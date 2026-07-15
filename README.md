@@ -38,6 +38,8 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
   <a href="https://github.com/OCEAN-xyz/datum_gateway"><img src="media/credits/datum.svg" alt="DATUM" height="44" /></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://osmu.wiki/"><img src="media/credits/osmu.svg" alt="Open Source Miners United" height="48" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://d-central.tech/"><img src="media/credits/d-central.png" alt="D-Central" height="48" /></a>
 </p>
 
 ### Bitcoin Knots
@@ -109,12 +111,16 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
   <a href="https://osmu.wiki/">
     <img src="media/credits/osmu.svg" alt="Open Source Miners United" height="48" />
   </a>
+  &nbsp;&nbsp;
+  <a href="https://d-central.tech/">
+    <img src="media/credits/d-central.png" alt="D-Central" height="48" />
+  </a>
 </p>
 
 | | |
 |---|---|
 | **Project** | [piaxe-miner](https://github.com/shufps/piaxe-miner) by [shufps](https://github.com/shufps) / [OSMU](https://osmu.wiki/) |
-| **Hardware** | [PiAxe](https://github.com/shufps/piaxe) (and related OSMU boards such as QAxe) |
+| **Hardware** | [PiAxe](https://github.com/shufps/piaxe) (and related OSMU boards such as QAxe); see [D-Central](#d-central-technologies) for manufacturing credit |
 | **Lineage** | Fork of [PyMiner](https://github.com/crypto-jeronimo/pyminer) (SHA256d stratum client); piaxe-miner added Python 3, PiAxe/QAxe drivers, reconnect logic |
 | **License** | GPL-3.0 (see `piaxe-miner/LICENSE.txt`) |
 | **Role in Blockvase** | Local Stratum v1 client + board control for the PiAxe HAT: talks only to the on-device DATUM Gateway, hashing when configured, REST/LM75 stats for the portal |
@@ -136,6 +142,28 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 - **Service coupling:** miner unit does not hard-require DATUM, so monitoring works when DATUM is off.
 
 Upstream piaxe-miner already documents its own changes versus original PyMiner (Python 3, PiAxe/QAxe, reconnect). Blockvase builds on that fork.
+
+### D-Central Technologies
+
+<p>
+  <a href="https://d-central.tech/">
+    <img src="media/credits/d-central.png" alt="D-Central" height="56" />
+  </a>
+</p>
+
+| | |
+|---|---|
+| **Organization** | [D-Central Technologies](https://d-central.tech/) ([d-central.tech/product/the-piaxe](https://d-central.tech/product/the-piaxe/)) |
+| **Role in Blockvase** | Open-source mining hardware partner: assembles, quality-tests, and supplies [PiAxe](https://github.com/shufps/piaxe) BM1366 Raspberry Pi HAT boards used for on-device hashing, and supports the [OSMU](https://osmu.wiki/) ecosystem that designs them. |
+
+**How we use it**
+
+- Blockvase’s built-in ASIC path is the OSMU PiAxe design; D-Central’s manufacturing and distribution make those boards available to builders.
+- No D-Central software is vendored in this repo—credit is for the hardware and community work behind PiAxe / OSMU production.
+
+**Blockvase modifications**
+
+- None to D-Central products or branding; logo used for attribution only.
 
 ### Raspberry Pi
 
@@ -178,9 +206,10 @@ The Blockvase web app also uses common Python packages (see `requirements.txt`),
 | Bitcoin Knots | No (release install) | No | Install script, systemd, RPC/portal |
 | DATUM Gateway | `datum_gateway/` | Integration only | Build, systemd, generated config |
 | piaxe-miner / PyMiner | `piaxe-miner/` | Yes (reliability + Blockvase ops) | Configs, systemd, soft-fail, payout gating |
+| D-Central (PiAxe hardware) | No | No | Attribution; PiAxe HAT manufacturing / supply |
 | Raspberry Pi OS | No | Image/scripts only | Bootstrap, kiosk, AP, clone path |
 
-Thank you to the Knots, OCEAN/DATUM, PiAxe/OSMU, PyMiner, and Raspberry Pi communities.
+Thank you to the Knots, OCEAN/DATUM, PiAxe/OSMU, D-Central, PyMiner, and Raspberry Pi communities.
 
 ---
 
