@@ -1,0 +1,5 @@
+# Credit logos
+
+These logos are used only for attribution in the repository [README.md](../../README.md) Credits section.
+
+Trademarks remain with their owners. DATUM / OCEAN marks are used for credit only; see the DATUM Gateway `LICENSE` for trademark terms. Raspberry Pi is a trademark of Raspberry Pi Ltd.

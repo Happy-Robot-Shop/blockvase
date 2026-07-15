@@ -1,8 +1,14 @@
 # Blockvase
 
-Blockvase turns a Raspberry Pi into a **Bitcoin node with a simple web portal and HDMI display**.
+## Full Bitcoin Knots Node, DATUM Gateway & ASIC Miner
 
-After install (or on a manufactured clone’s first boot) it creates its own Wi-Fi network so you can set it up from your phone. Then it joins your home Wi-Fi, syncs the Bitcoin blockchain, and shows status on the screen and in a browser.
+Blockvase is an all-in-one device for the sovereign bitcoiner. It gives you a full Bitcoin Knots node with true solo mining, enabled by a local DATUM gateway and a built-in BM1366 Bitcoin mining ASIC chip all within one visually stunning, petite, white and copper cube.
+
+Solo mining is **DATUM + your local Knots node**, not a public mining pool. Block templates come from Knots via DATUM Gateway. The PiAxe software still speaks **Stratum v1**, but only to the local gateway on `127.0.0.1:23334`—that is the miner↔gateway wire protocol, not pool Stratum mining.
+
+A smooth glass-covered display shows current sync status during initial block download, then becomes a live Bitcoin mempool animation of every transaction waiting to be confirmed. The device also locally hosts a web dashboard at [blockvase.local](http://blockvase.local) so you can use your own node to view Bitcoin network metrics and transactions. Future updates will unlock even more functionality.
+
+Setup is quick and easy. Just plug in the device, press the button on the back inside the vent hole, and scan the QR code to begin. You'll be connected to the device's onboard access point and scan one more QR code to connect the device to your network via 2.4GHz WiFi for maximum range.
 
 | | |
 |---|---|
@@ -11,6 +17,170 @@ After install (or on a manufactured clone’s first boot) it creates its own Wi-
 | **Display** | Full-screen kiosk (not the Pi desktop) |
 | **Networking** | NetworkManager |
 | **Node** | [Bitcoin Knots](https://github.com/bitcoinknots/bitcoin/releases/tag/v29.3.knots20260508) (full archival, local RPC only) |
+| **Mining** | Local [DATUM Gateway](https://github.com/OCEAN-xyz/datum_gateway) (solo from Knots GBT) + BM1366 (PiAxe); Stratum v1 only to localhost |
+
+---
+
+## Credits
+
+Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos below are for attribution only; trademarks belong to their owners.
+
+<p align="center">
+  <a href="https://www.raspberrypi.com/"><img src="media/credits/raspberry-pi.svg" alt="Raspberry Pi" height="56" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://bitcoin.org/"><img src="media/credits/bitcoin.svg" alt="Bitcoin" height="48" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://bitcoinknots.org/"><img src="media/credits/bitcoin-knots.svg" alt="Bitcoin Knots" height="40" /></a>
+</p>
+<p align="center">
+  <a href="https://ocean.xyz/"><img src="media/credits/ocean-logotype.svg" alt="OCEAN" height="36" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/OCEAN-xyz/datum_gateway"><img src="media/credits/datum.svg" alt="DATUM" height="44" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://osmu.wiki/"><img src="media/credits/osmu.svg" alt="Open Source Miners United" height="48" /></a>
+</p>
+
+### Bitcoin Knots
+
+<p>
+  <a href="https://bitcoinknots.org/">
+    <img src="media/credits/bitcoin-knots.svg" alt="Bitcoin Knots" height="48" />
+  </a>
+</p>
+
+| | |
+|---|---|
+| **Project** | [Bitcoin Knots](https://bitcoinknots.org/) ([github.com/bitcoinknots/bitcoin](https://github.com/bitcoinknots/bitcoin)) |
+| **License** | MIT (see upstream `COPYING`) |
+| **Role in Blockvase** | Local full archival node and JSON-RPC (`bitcoind`). Portal metrics, mempool display, and DATUM GBT all talk to this node on `127.0.0.1`. |
+
+**How we use it**
+
+- Installed from official Knots release tarballs by `scripts/install-bitcoin-knots.sh` during bootstrap (not vendored as source in this repo).
+- Systemd unit: `systemd/bitcoind.service`.
+- RPC credentials live in `/etc/bitcoin/bitcoin.conf` and are mirrored into the portal config for localhost-only use.
+
+**Blockvase modifications**
+
+- None to the Knots binary or upstream source.
+- Packaging and ops only: install script, systemd unit, chain-guard / reindex helpers, and portal RPC wiring.
+
+### DATUM Gateway (OCEAN)
+
+<p>
+  <a href="https://ocean.xyz/">
+    <img src="media/credits/ocean-logotype.svg" alt="OCEAN" height="36" />
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://ocean.xyz/">
+    <img src="media/credits/ocean-symbol.svg" alt="OCEAN symbol" height="40" />
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/OCEAN-xyz/datum_gateway">
+    <img src="media/credits/datum.svg" alt="DATUM" height="40" />
+  </a>
+</p>
+
+| | |
+|---|---|
+| **Project** | [DATUM Gateway](https://github.com/OCEAN-xyz/datum_gateway) by [OCEAN](https://ocean.xyz/) (Bitcoin Ocean, LLC, Jason Hughes, and contributors) |
+| **License** | MIT (see `datum_gateway/LICENSE`). The DATUM / OCEAN trademarks are **not** licensed by that file; used here for credit only. |
+| **Role in Blockvase** | Solo mining gateway: pulls block templates from local Knots (GBT/RPC) and serves work to the ASIC client. Not connected to a remote DATUM pool (`pool_host` empty, `pooled_mining_only` false). |
+
+**How we use it**
+
+- Source is vendored under `datum_gateway/` and built on-device by `scripts/install-mining-stack.sh`.
+- Runtime config: `/etc/blockvase/datum_gateway_config.json` (written by `scripts/set-mining-payout.sh`).
+- Systemd unit: `systemd/datum-gateway.service`.
+- Exposes **Stratum v1 on localhost only** (`127.0.0.1:23334`) so PiAxe-miner can consume work. That Stratum endpoint is the local hardware interface; work origin is DATUM + Knots, not a public Stratum pool.
+
+**Blockvase modifications**
+
+- No functional forks of the DATUM C sources for product features.
+- Integration layer only:
+  - Build/install path and systemd unit templating
+  - Generated solo-mining JSON config (RPC user/password from Knots, payout address, local Stratum bind; no remote pool)
+  - DATUM stays disabled until a payout address is saved (DATUM requires a valid `mining.pool_address`)
+  - Coinbase tags set to Blockvase / DATUM solo in generated config
+
+### PiAxe-miner (and PyMiner)
+
+<p>
+  <a href="https://osmu.wiki/">
+    <img src="media/credits/osmu.svg" alt="Open Source Miners United" height="48" />
+  </a>
+</p>
+
+| | |
+|---|---|
+| **Project** | [piaxe-miner](https://github.com/shufps/piaxe-miner) by [shufps](https://github.com/shufps) / [OSMU](https://osmu.wiki/) |
+| **Hardware** | [PiAxe](https://github.com/shufps/piaxe) (and related OSMU boards such as QAxe) |
+| **Lineage** | Fork of [PyMiner](https://github.com/crypto-jeronimo/pyminer) (SHA256d stratum client); piaxe-miner added Python 3, PiAxe/QAxe drivers, reconnect logic |
+| **License** | GPL-3.0 (see `piaxe-miner/LICENSE.txt`) |
+| **Role in Blockvase** | Local Stratum v1 client + board control for the PiAxe HAT: talks only to the on-device DATUM Gateway, hashing when configured, REST/LM75 stats for the portal |
+
+**How we use it**
+
+- Vendored under `piaxe-miner/`.
+- Launched by `scripts/blockvase-miner-run.sh` / `systemd/blockvase-miner.service`.
+- Default configs: `piaxe-miner/config.blockvase.yml` and `config.blockvase.simulate.yml`.
+- Connects to **local DATUM only** (`stratum+tcp://127.0.0.1:23334`) when a payout address is set—never to an external Stratum pool URL.
+
+**Blockvase modifications** (relative to upstream piaxe-miner)
+
+- **Graceful hardware failure:** board/GPIO/I2C init failures no longer kill the process; REST stays up when possible (`piaxe/miner.py`).
+- **Graceful ASIC failure:** chip enumeration failure keeps LM75/REST monitoring without hashing (extended soft-fail path).
+- **Monitoring without payout:** miner service can run with an empty Stratum user; no hashing until Settings saves a payout (`pyminer.py`, `blockvase-miner-run.sh`).
+- **Blockvase configs:** production and CPU-simulation YAML, REST on localhost for portal mining metrics.
+- **Lifecycle:** systemd + env file (`/etc/blockvase/miner.env`) instead of ad-hoc shell start; simulation toggle via Settings.
+- **Service coupling:** miner unit does not hard-require DATUM, so monitoring works when DATUM is off.
+
+Upstream piaxe-miner already documents its own changes versus original PyMiner (Python 3, PiAxe/QAxe, reconnect). Blockvase builds on that fork.
+
+### Raspberry Pi
+
+<p>
+  <a href="https://www.raspberrypi.com/">
+    <img src="media/credits/raspberry-pi.svg" alt="Raspberry Pi" height="56" />
+  </a>
+</p>
+
+| | |
+|---|---|
+| **Project** | [Raspberry Pi](https://www.raspberrypi.com/) OS and hardware |
+| **Role in Blockvase** | Target platform (64-bit Bookworm/Trixie), kiosk display, NetworkManager Wi-Fi / AP, GPIO/I2C/UART for PiAxe |
+
+**Blockvase modifications**
+
+- Not a software fork of Raspberry Pi OS.
+- Device image and scripts: kiosk-only boot, AP setup flow, clone-safety expand/identity, Wi-Fi recovery, mining UART/console prep.
+
+*Raspberry Pi is a trademark of Raspberry Pi Ltd.*
+
+### Bitcoin
+
+<p>
+  <a href="https://bitcoin.org/">
+    <img src="media/credits/bitcoin.svg" alt="Bitcoin" height="40" />
+  </a>
+</p>
+
+Bitcoin is the network and monetary system Blockvase participates in as a full node and (optionally) solo miner. Protocol and ecosystem credits belong to the Bitcoin community and the projects above.
+
+### Other libraries (portal)
+
+The Blockvase web app also uses common Python packages (see `requirements.txt`), including Flask, Waitress, requests, and qrcode. Those are installed into `.venv` at bootstrap and are not vendored as source trees.
+
+### Summary
+
+| Upstream | In this repo | Modified source? | Blockvase layer |
+|----------|--------------|------------------|-----------------|
+| Bitcoin Knots | No (release install) | No | Install script, systemd, RPC/portal |
+| DATUM Gateway | `datum_gateway/` | Integration only | Build, systemd, generated config |
+| piaxe-miner / PyMiner | `piaxe-miner/` | Yes (reliability + Blockvase ops) | Configs, systemd, soft-fail, payout gating |
+| Raspberry Pi OS | No | Image/scripts only | Bootstrap, kiosk, AP, clone path |
+
+Thank you to the Knots, OCEAN/DATUM, PiAxe/OSMU, PyMiner, and Raspberry Pi communities.
 
 ---
 
@@ -114,6 +284,7 @@ At a glance:
 
 - The **portal** (`blockvase.service`) serves the UI and APIs.
 - The **node** (`bitcoind`) stores the chain under `/var/lib/bitcoind`.
+- **Solo mining** is DATUM Gateway + local Knots (block templates). PiAxe uses Stratum v1 only as the local cable to DATUM on `127.0.0.1:23334`—not pool Stratum mining.
 - The **kiosk** is a full-screen Chromium session on HDMI (not the Pi desktop).
 - **Setup networking** uses a temporary hotspot, then a saved home Wi-Fi profile.
 - On every boot, **clone safety** checks whether this image was cloned onto new hardware; if so, it refreshes identity and expands the disk before the node starts.
@@ -129,7 +300,7 @@ At a glance:
 | `blockvase-switch-to-kiosk-vt.service` | Switches to the kiosk screen early in boot |
 | `blockvase-chain-guard.timer` | Auto-recovery if chainstate corrupts |
 | `blockvase-wifi-watch.timer` | If home Wi-Fi stays down, recover to setup AP + QR |
-| `datum-gateway.service` / `blockvase-miner.service` | Miner on by default; DATUM/hashing after payout address |
+| `datum-gateway.service` / `blockvase-miner.service` | Solo path: PiAxe → local Stratum → DATUM → Knots GBT (not a public pool). Miner on by default; DATUM/hashing after payout address |
 
 ```bash
 sudo systemctl status blockvase-ap bitcoind blockvase blockvase-kiosk
