@@ -39,7 +39,7 @@ Run install commands over **SSH** if a desktop is already on screen. Bootstrap t
 2. On the Pi:
    ```bash
    cd ~
-   git clone https://github.com/happyrobotshop/blockvase.git
+   git clone https://github.com/Happy-Robot-Shop/blockvase.git
    cd blockvase
    sudo ./scripts/bootstrap.sh
    sudo reboot
