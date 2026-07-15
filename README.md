@@ -8,7 +8,7 @@ The following describes the **pre-assembled, chain-synced Blockvase** sold at [b
 
 Blockvase is an all-in-one device for the sovereign bitcoiner. It gives you a full Bitcoin Knots node with true solo mining, enabled by a local DATUM gateway and a built-in BM1366 Bitcoin mining ASIC chip all within one visually stunning, petite, white and copper cube.
 
-Solo mining is **DATUM + your local Knots node**, not a public mining pool. Block templates come from Knots via DATUM Gateway. The PiAxe software still speaks **Stratum v1**, but only to the local gateway on `127.0.0.1:23334`—that is the miner↔gateway wire protocol, not pool Stratum mining.
+Solo mining is **DATUM + your local Knots node**, not a public mining pool. Block templates come from Knots via DATUM Gateway. The PiAxe software still speaks **Stratum v1**, but only to the local gateway on `127.0.0.1:23334`. That is the miner↔gateway wire protocol, not pool Stratum mining.
 
 A smooth glass-covered display shows current sync status during initial block download, then becomes a live Bitcoin mempool animation of every transaction waiting to be confirmed. The device also locally hosts a web dashboard at [blockvase.local](http://blockvase.local) so you can use your own node to view Bitcoin network metrics and transactions. Future updates will unlock even more functionality.
 
@@ -16,7 +16,9 @@ Setup is quick and easy. Just plug in the device, press the button on the back i
 
 ### This repository
 
-We have **open-sourced the entire Blockvase stack**—software and hardware—so anyone can build their own, inspect every layer, and verify that what runs on the device matches what is published here. Portal, kiosk, Bitcoin Knots install, DATUM Gateway, PiAxe-miner, device scripts, and the modified PiAxe HAT design (`hardware/piaxe/`) all live in this repo. Prefer a finished unit? Get one at [blockvase.com](https://blockvase.com).
+We have **open-sourced the entire Blockvase stack** (software and hardware) so anyone can build their own, inspect every layer, and verify that what runs on the device matches what is published here. Portal, kiosk, Bitcoin Knots install, DATUM Gateway, PiAxe-miner, device scripts, and the modified PiAxe HAT design (`hardware/piaxe/`) all live in this repo. Prefer a finished unit? Get one at [blockvase.com](https://blockvase.com).
+
+To build from this repo on a Raspberry Pi, start with **[Path A: Fresh install](#path-a-fresh-install)**.
 
 | | |
 |---|---|
@@ -139,7 +141,7 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 - **Hardware:** Blockvase ships a modified PiAxe HAT. Design files and schematics live under `hardware/piaxe/`. The main change versus the original OSMU PiAxe is **single USB-C power** for the entire stack (Raspberry Pi + miner HAT), instead of the stock PiAxe power arrangement.
 - **Software:** Vendored under `piaxe-miner/`, launched by `scripts/blockvase-miner-run.sh` / `systemd/blockvase-miner.service`.
 - Default configs: `piaxe-miner/config.blockvase.yml` and `config.blockvase.simulate.yml`.
-- Connects to **local DATUM only** (`stratum+tcp://127.0.0.1:23334`) when a payout address is set—never to an external Stratum pool URL.
+- Connects to **local DATUM only** (`stratum+tcp://127.0.0.1:23334`) when a payout address is set. It never connects to an external Stratum pool URL.
 
 **Blockvase modifications**
 
@@ -169,7 +171,7 @@ Upstream piaxe-miner already documents its own changes versus original PyMiner (
 **How we use it**
 
 - Blockvase’s on-device ASIC path starts from the OSMU PiAxe (see [hardware redesign](#piaxe-miner-and-pyminer) in `hardware/piaxe/`); D-Central’s manufacturing and distribution of PiAxe boards and OSMU support are part of that lineage.
-- No D-Central software is vendored in this repo—credit is for hardware and community work around PiAxe / OSMU production.
+- No D-Central software is vendored in this repo. Credit is for hardware and community work around PiAxe / OSMU production.
 
 **Blockvase modifications**
 
@@ -280,7 +282,7 @@ Use this when one prepared SD image should become many unique devices.
    - expands the root filesystem to fill the NVMe
    - keeps the Bitcoin datadir if it was on the master
 
-Repeat steps 3 to 4 for more units. You do **not** need to run bootstrap on each clone for identity, expand, or setup. Run it later only if you want package or code updates.
+Repeat steps 3 to 4 for as many units as you need. You do **not** need to run bootstrap on each clone for identity, expand, or setup. Run it later only if you want package or code updates.
 
 ---
 
@@ -324,7 +326,7 @@ At a glance:
 
 - The **portal** (`blockvase.service`) serves the UI and APIs.
 - The **node** (`bitcoind`) stores the chain under `/var/lib/bitcoind`.
-- **Solo mining** is DATUM Gateway + local Knots (block templates). PiAxe uses Stratum v1 only as the local cable to DATUM on `127.0.0.1:23334`—not pool Stratum mining.
+- **Solo mining** is DATUM Gateway + local Knots (block templates). PiAxe uses Stratum v1 only as the local cable to DATUM on `127.0.0.1:23334`. This is not pool Stratum mining.
 - The **kiosk** is a full-screen Chromium session on HDMI (not the Pi desktop).
 - **Setup networking** uses a temporary hotspot, then a saved home Wi-Fi profile.
 - On every boot, **clone safety** checks whether this image was cloned onto new hardware; if so, it refreshes identity and expands the disk before the node starts.
