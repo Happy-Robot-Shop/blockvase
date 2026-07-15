@@ -30,7 +30,7 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://bitcoin.org/"><img src="media/credits/bitcoin.svg" alt="Bitcoin" height="48" /></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://bitcoinknots.org/"><img src="media/credits/bitcoin-knots.svg" alt="Bitcoin Knots" height="40" /></a>
+  <a href="https://bitcoinknots.org/"><img src="media/credits/bitcoin-knots.png" alt="Bitcoin Knots" height="48" /></a>
 </p>
 <p align="center">
   <a href="https://ocean.xyz/"><img src="media/credits/ocean-logotype.svg" alt="OCEAN" height="36" /></a>
@@ -46,7 +46,7 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 
 <p>
   <a href="https://bitcoinknots.org/">
-    <img src="media/credits/bitcoin-knots.svg" alt="Bitcoin Knots" height="48" />
+    <img src="media/credits/bitcoin-knots.png" alt="Bitcoin Knots" height="56" />
   </a>
 </p>
 
