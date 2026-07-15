@@ -2,6 +2,10 @@
 
 ## Full Bitcoin Knots Node, DATUM Gateway & ASIC Miner
 
+### The product
+
+The following describes the **pre-assembled, chain-synced Blockvase** sold at [blockvase.com](https://blockvase.com):
+
 Blockvase is an all-in-one device for the sovereign bitcoiner. It gives you a full Bitcoin Knots node with true solo mining, enabled by a local DATUM gateway and a built-in BM1366 Bitcoin mining ASIC chip all within one visually stunning, petite, white and copper cube.
 
 Solo mining is **DATUM + your local Knots node**, not a public mining pool. Block templates come from Knots via DATUM Gateway. The PiAxe software still speaks **Stratum v1**, but only to the local gateway on `127.0.0.1:23334`—that is the miner↔gateway wire protocol, not pool Stratum mining.
@@ -9,6 +13,10 @@ Solo mining is **DATUM + your local Knots node**, not a public mining pool. Bloc
 A smooth glass-covered display shows current sync status during initial block download, then becomes a live Bitcoin mempool animation of every transaction waiting to be confirmed. The device also locally hosts a web dashboard at [blockvase.local](http://blockvase.local) so you can use your own node to view Bitcoin network metrics and transactions. Future updates will unlock even more functionality.
 
 Setup is quick and easy. Just plug in the device, press the button on the back inside the vent hole, and scan the QR code to begin. You'll be connected to the device's onboard access point and scan one more QR code to connect the device to your network via 2.4GHz WiFi for maximum range.
+
+### This repository
+
+We have **open-sourced the entire Blockvase stack**—software and hardware—so anyone can build their own, inspect every layer, and verify that what runs on the device matches what is published here. Portal, kiosk, Bitcoin Knots install, DATUM Gateway, PiAxe-miner, device scripts, and the modified PiAxe HAT design (`hardware/piaxe/`) all live in this repo. Prefer a finished unit? Get one at [blockvase.com](https://blockvase.com).
 
 | | |
 |---|---|
@@ -18,6 +26,7 @@ Setup is quick and easy. Just plug in the device, press the button on the back i
 | **Networking** | NetworkManager |
 | **Node** | [Bitcoin Knots](https://github.com/bitcoinknots/bitcoin/releases/tag/v29.3.knots20260508) (full archival, local RPC only) |
 | **Mining** | Local [DATUM Gateway](https://github.com/OCEAN-xyz/datum_gateway) (solo from Knots GBT) + BM1366 (PiAxe); Stratum v1 only to localhost |
+| **Buy** | Pre-assembled & synced: [blockvase.com](https://blockvase.com) |
 
 ---
 
@@ -119,21 +128,22 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 
 | | |
 |---|---|
-| **Project** | [piaxe-miner](https://github.com/shufps/piaxe-miner) by [shufps](https://github.com/shufps) / [OSMU](https://osmu.wiki/) |
-| **Hardware** | [PiAxe](https://github.com/shufps/piaxe) (and related OSMU boards such as QAxe); see [D-Central](#d-central-technologies) for manufacturing credit |
-| **Lineage** | Fork of [PyMiner](https://github.com/crypto-jeronimo/pyminer) (SHA256d stratum client); piaxe-miner added Python 3, PiAxe/QAxe drivers, reconnect logic |
-| **License** | GPL-3.0 (see `piaxe-miner/LICENSE.txt`) |
-| **Role in Blockvase** | Local Stratum v1 client + board control for the PiAxe HAT: talks only to the on-device DATUM Gateway, hashing when configured, REST/LM75 stats for the portal |
+| **Project** | [piaxe-miner](https://github.com/shufps/piaxe-miner) by [shufps](https://github.com/shufps) / [OSMU](https://osmu.wiki/); hardware from [PiAxe](https://github.com/shufps/piaxe) |
+| **Hardware** | Blockvase PiAxe-derived BM1366 HAT (see `hardware/piaxe/`); upstream design by [shufps](https://github.com/shufps) / [OSMU](https://osmu.wiki/); see [D-Central](#d-central-technologies) for PiAxe manufacturing credit |
+| **Lineage** | Software: fork of [PyMiner](https://github.com/crypto-jeronimo/pyminer) (SHA256d stratum client); piaxe-miner added Python 3, PiAxe/QAxe drivers, reconnect logic. Hardware: OSMU PiAxe HAT, redesigned for Blockvase power delivery |
+| **License** | Software: GPL-3.0 (see `piaxe-miner/LICENSE.txt`). Hardware: see `hardware/piaxe/` |
+| **Role in Blockvase** | On-device BM1366 hashing + board control: PiAxe-miner speaks Stratum v1 only to local DATUM Gateway; REST/LM75 stats for the portal |
 
 **How we use it**
 
-- Vendored under `piaxe-miner/`.
-- Launched by `scripts/blockvase-miner-run.sh` / `systemd/blockvase-miner.service`.
+- **Hardware:** Blockvase ships a modified PiAxe HAT. Design files and schematics live under `hardware/piaxe/`. The main change versus the original OSMU PiAxe is **single USB-C power** for the entire stack (Raspberry Pi + miner HAT), instead of the stock PiAxe power arrangement.
+- **Software:** Vendored under `piaxe-miner/`, launched by `scripts/blockvase-miner-run.sh` / `systemd/blockvase-miner.service`.
 - Default configs: `piaxe-miner/config.blockvase.yml` and `config.blockvase.simulate.yml`.
 - Connects to **local DATUM only** (`stratum+tcp://127.0.0.1:23334`) when a payout address is set—never to an external Stratum pool URL.
 
-**Blockvase modifications** (relative to upstream piaxe-miner)
+**Blockvase modifications**
 
+- **HAT redesign (hardware):** Single USB-C input powers the full device (Pi + BM1366 HAT). Schematics and related files are in `hardware/piaxe/` (derived from the open [PiAxe](https://github.com/shufps/piaxe) design).
 - **Graceful hardware failure:** board/GPIO/I2C init failures no longer kill the process; REST stays up when possible (`piaxe/miner.py`).
 - **Graceful ASIC failure:** chip enumeration failure keeps LM75/REST monitoring without hashing (extended soft-fail path).
 - **Monitoring without payout:** miner service can run with an empty Stratum user; no hashing until Settings saves a payout (`pyminer.py`, `blockvase-miner-run.sh`).
@@ -141,7 +151,7 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 - **Lifecycle:** systemd + env file (`/etc/blockvase/miner.env`) instead of ad-hoc shell start; simulation toggle via Settings.
 - **Service coupling:** miner unit does not hard-require DATUM, so monitoring works when DATUM is off.
 
-Upstream piaxe-miner already documents its own changes versus original PyMiner (Python 3, PiAxe/QAxe, reconnect). Blockvase builds on that fork.
+Upstream piaxe-miner already documents its own changes versus original PyMiner (Python 3, PiAxe/QAxe, reconnect). Blockvase builds on that fork for software and on the OSMU PiAxe HAT for hardware.
 
 ### D-Central Technologies
 
@@ -154,16 +164,16 @@ Upstream piaxe-miner already documents its own changes versus original PyMiner (
 | | |
 |---|---|
 | **Organization** | [D-Central Technologies](https://d-central.tech/) ([d-central.tech/product/the-piaxe](https://d-central.tech/product/the-piaxe/)) |
-| **Role in Blockvase** | Open-source mining hardware partner: assembles, quality-tests, and supplies [PiAxe](https://github.com/shufps/piaxe) BM1366 Raspberry Pi HAT boards used for on-device hashing, and supports the [OSMU](https://osmu.wiki/) ecosystem that designs them. |
+| **Role in Blockvase** | Open-source mining hardware partner in the [OSMU](https://osmu.wiki/) / PiAxe ecosystem: assembles, quality-tests, and supplies [PiAxe](https://github.com/shufps/piaxe) BM1366 Raspberry Pi HAT boards that Blockvase’s own HAT design builds on. |
 
 **How we use it**
 
-- Blockvase’s built-in ASIC path is the OSMU PiAxe design; D-Central’s manufacturing and distribution make those boards available to builders.
-- No D-Central software is vendored in this repo—credit is for the hardware and community work behind PiAxe / OSMU production.
+- Blockvase’s on-device ASIC path starts from the OSMU PiAxe (see [hardware redesign](#piaxe-miner-and-pyminer) in `hardware/piaxe/`); D-Central’s manufacturing and distribution of PiAxe boards and OSMU support are part of that lineage.
+- No D-Central software is vendored in this repo—credit is for hardware and community work around PiAxe / OSMU production.
 
 **Blockvase modifications**
 
-- None to D-Central products or branding; logo used for attribution only.
+- None to D-Central products or branding; logo used for attribution only. The Blockvase HAT (single USB-C power for the full stack) is our derivative of the open PiAxe design, not a D-Central product SKU.
 
 ### Raspberry Pi
 
@@ -206,7 +216,8 @@ The Blockvase web app also uses common Python packages (see `requirements.txt`),
 | Bitcoin Knots | No (release install) | No | Install script, systemd, RPC/portal |
 | DATUM Gateway | `datum_gateway/` | Integration only | Build, systemd, generated config |
 | piaxe-miner / PyMiner | `piaxe-miner/` | Yes (reliability + Blockvase ops) | Configs, systemd, soft-fail, payout gating |
-| D-Central (PiAxe hardware) | No | No | Attribution; PiAxe HAT manufacturing / supply |
+| PiAxe HAT (OSMU / shufps) | `hardware/piaxe/` | Yes (power delivery) | Single USB-C for full stack; schematics in repo |
+| D-Central (PiAxe ecosystem) | No | No | Attribution; PiAxe manufacturing / OSMU support |
 | Raspberry Pi OS | No | Image/scripts only | Bootstrap, kiosk, AP, clone path |
 
 Thank you to the Knots, OCEAN/DATUM, PiAxe/OSMU, D-Central, PyMiner, and Raspberry Pi communities.
