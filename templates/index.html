@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Blockvase | Bitcoin Node & Network Metrics</title>
+    <link rel="icon" href="/media/logo_64.png" type="image/png" />
+    <link rel="stylesheet" href="/static/style.css" />
+    <style>
+      /* Critical: mempool hidden until JS confirms chain is synced (before style.css loads) */
+      body.portal-page .display-preview { display: none !important; }
+      body.portal-page.portal-mempool-visible .display-preview { display: block !important; }
+      body.portal-page.portal-layout-pending #status,
+      body.portal-page.portal-layout-pending #metrics { display: none !important; }
+      body.portal-page .portal-layout-loader {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 10031;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+      }
+      body.portal-page.portal-layout-pending .portal-layout-loader { display: flex; }
+      body.portal-page .portal-layout-spinner {
+        width: 48px;
+        height: 48px;
+        border: 3px solid rgba(247, 147, 26, 0.22);
+        border-top-color: #f7931a;
+        border-radius: 50%;
+        animation: portal-layout-spin 0.85s linear infinite;
+      }
+      @keyframes portal-layout-spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body class="portal-page portal-layout-pending" data-theme="{{ theme | default('default') }}">
+    <div class="portal-splash-overlay" id="portalSplashOverlay" aria-hidden="true"></div>
+    <div class="portal-layout-loader" id="portalLayoutLoader" aria-busy="true" aria-label="Loading dashboard">
+      <div class="portal-layout-spinner" role="status" aria-hidden="true"></div>
+    </div>
+    <div class="loading-overlay device-update-overlay" id="deviceUpdateOverlay" aria-live="polite" aria-label="Device update" aria-hidden="true">
+      <div class="loading-spinner" id="deviceUpdateSpinner" aria-hidden="true"></div>
+      <div class="loading-text" id="deviceUpdateTitle">Updating Blockvase</div>
+      <p class="muted-note muted-note--compact" id="deviceUpdateMessage">Pulling the latest software. This can take several minutes.</p>
+    </div>
+    <div class="container">
+      <header>
+        <div class="header-left">
+          <img class="logo" src="/media/logo_200.png" alt="Blockvase" />
+          <h1 id="deviceNameHeader"></h1>
+        </div>
+        <div class="header-right">
+          <a href="/settings" class="btn-icon portal-header-settings" aria-label="Device settings" title="Device settings"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></a>
+          <button type="button" class="btn-icon portal-fullscreen" id="portalFullscreen" aria-label="Fullscreen">⛶</button>
+        </div>
+      </header>
+      <div id="status"></div>
+      <div id="metrics">
+        <div class="display-preview metric-board metric-board--dense" id="portalMempoolCard" hidden>
+          <div class="display-preview-header">
+            <div class="display-preview-header-text">
+              <h2 class="metric-board-title">Live Mempool</h2>
+              <p class="display-preview-lede muted-note">Click a block in the treemap to view transaction details below.</p>
+            </div>
+            <button type="button" class="btn-icon display-open-full" id="displayOpenFull" aria-label="Open mempool in new tab"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></button>
+          </div>
+          <div class="display-iframe-wrapper" id="displayIframeWrapper">
+            <iframe class="display-iframe" id="displayIframe" data-src="/mempool?embed=1" title="Live mempool treemap" loading="lazy"></iframe>
+          </div>
+          <div id="tx-detail-panel" class="tx-detail-panel" aria-hidden="true">
+            <button type="button" class="btn-icon tx-detail-fullscreen" id="txDetailFullscreen" aria-label="Fullscreen">⛶</button>
+            <button type="button" class="btn-icon tx-detail-close" aria-label="Close transaction detail">×</button>
+            <div class="tx-detail-header">
+              <span class="tx-detail-status" id="tx-detail-status"></span>
+              <span class="tx-detail-txid portal-kpi-value--mono" id="tx-detail-txid"></span>
+            </div>
+            <div class="tx-detail-body">
+              <div id="tx-graph" class="tx-table-view" tabindex="0" aria-label="Transaction details"></div>
+              <div class="tx-table-copy-toast" id="txTableCopyToast" aria-live="polite" hidden></div>
+            </div>
+          </div>
+        </div>
+        <div id="metricsGrid" aria-hidden="true"></div>
+        <div id="metricsBeforeMempool"></div>
+        <div id="metricsUpperDetail"></div>
+      </div>
+    </div>
+    <script src="/static/device-update.js"></script>
+    <script src="/static/index.js"></script>
+  </body>
+</html>

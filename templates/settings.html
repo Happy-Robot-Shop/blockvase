@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Blockvase Settings</title>
+    <link rel="icon" href="/media/logo_64.png" type="image/png" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="portal-page settings-page" data-theme="{{ theme | default('default') }}">
+    <div class="portal-splash-overlay" id="portalSplashOverlay" aria-hidden="true"></div>
+    <div class="loading-overlay" id="loadingOverlay">
+      <div class="loading-spinner"></div>
+      <div class="loading-text" id="loadingText">Saving...</div>
+    </div>
+    <div class="loading-overlay device-update-overlay" id="deviceUpdateOverlay" aria-live="polite" aria-label="Device update" aria-hidden="true">
+      <div class="loading-spinner" id="deviceUpdateSpinner" aria-hidden="true"></div>
+      <div class="loading-text" id="deviceUpdateTitle">Updating Blockvase</div>
+      <p class="muted-note muted-note--compact" id="deviceUpdateMessage">Pulling the latest software. This can take several minutes.</p>
+    </div>
+    <div class="container" id="mainContainer">
+      <header>
+        <div class="header-left">
+          <img class="logo" src="/media/logo_200.png" alt="Blockvase" />
+          <h1 id="deviceNameHeader">Settings</h1>
+        </div>
+        <div class="header-right">
+          <a href="/" class="btn-icon settings-back-link" aria-label="Back to portal" title="Back to portal"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></a>
+        </div>
+      </header>
+
+      <div id="adminAuthSection" class="settings-card metric-board metric-board--dense" style="display:none;">
+        <h2 class="metric-board-title">Settings Login</h2>
+        <p id="adminAuthHelp" class="muted-note">
+          Enter the admin username and password configured during setup.
+        </p>
+        <div id="adminAuthStatus" class="status info" style="display:none;"></div>
+        <form id="adminLoginForm" autocomplete="off">
+          <label for="adminLoginUsername">Username</label>
+          <input id="adminLoginUsername" type="text" placeholder="admin" autocomplete="username" required />
+          <label for="adminLoginPassword">Password</label>
+          <input id="adminLoginPassword" type="password" placeholder="Password" autocomplete="current-password" data-password="true" required />
+          <button class="btn" type="submit">Log In</button>
+        </form>
+      </div>
+
+      <div class="settings-sections" id="settingsSections" style="display:none;">
+      <div id="setupSection" class="settings-card metric-board metric-board--dense" style="display:none;">
+        <h2 class="metric-board-title">Initial Setup</h2>
+        <p class="muted-note">Bitcoin runs on this device (local Knots). Connect your Wi-Fi to finish setup.</p>
+        <div id="setupStatus" class="status info" style="display:none;"></div>
+        <form id="setupForm" autocomplete="off">
+          <label for="setupDeviceName">Device Name</label>
+          <input id="setupDeviceName" type="text" placeholder="Enter unique device name" maxlength="19" required />
+          <label for="setupAdminUsername">Admin Username</label>
+          <input id="setupAdminUsername" type="text" placeholder="admin" autocomplete="username" value="admin" required />
+          <label for="setupAdminPassword">Admin Password</label>
+          <input id="setupAdminPassword" type="password" placeholder="At least 8 characters" autocomplete="new-password" data-password="true" required />
+          <label for="setupAdminPasswordConfirm">Confirm Admin Password</label>
+          <input id="setupAdminPasswordConfirm" type="password" placeholder="Repeat password" autocomplete="new-password" data-password="true" required />
+          <label for="setupSsid">WiFi Network</label>
+          <input id="setupSsid" type="text" placeholder="SSID" autocomplete="off" required />
+          <label for="setupPassword">WiFi Password</label>
+          <input id="setupPassword" type="password" placeholder="Password" autocomplete="off" data-password="true" />
+          <button class="btn" type="submit">Save & Reboot</button>
+        </form>
+      </div>
+
+      <div class="settings-config-row">
+      <div class="settings-config-main">
+      <div id="wifiRpcSection" class="settings-card metric-board metric-board--dense network-settings-card">
+        <h2 class="metric-board-title">Network</h2>
+        <p class="muted-note network-settings-lede">
+          Hostname, admin login, and Wi-Fi for this device. Knots RPC stays on <strong>127.0.0.1:8332</strong>.
+        </p>
+        <div id="wifiRpcStatus" class="status info" style="display:none;"></div>
+
+        <div class="portal-kpi-strip portal-kpi-strip--in-board portal-kpi-strip--settings-node" aria-label="Node connection">
+          <div class="portal-kpi">
+            <span class="portal-kpi-label">Node</span>
+            <span class="portal-kpi-value portal-kpi-value--mono" id="rpcNode">-</span>
+          </div>
+          <div class="portal-kpi">
+            <span class="portal-kpi-label">RPC</span>
+            <span class="portal-kpi-value" id="rpcStatus">-</span>
+          </div>
+        </div>
+
+        <div class="metric-cluster-divider" aria-hidden="true"></div>
+
+        <div class="metric-cluster">
+          <h4 class="metric-cluster-title">Device name</h4>
+          <div id="deviceNameStatus" class="status info" style="display:none;"></div>
+          <form id="deviceNameForm" autocomplete="off">
+            <div class="network-field-grid network-field-grid--single">
+              <div>
+                <label for="deviceName">Hostname</label>
+                <input id="deviceName" type="text" placeholder="blockvase" maxlength="19" />
+              </div>
+            </div>
+            <p class="network-device-hint">
+              Portal at <span id="deviceAddress" class="network-device-address">-</span>
+            </p>
+            <button class="btn secondary btn-network-secondary" type="submit">Save name</button>
+          </form>
+        </div>
+
+        <form id="wifiRpcForm" class="network-save-form" autocomplete="off">
+          <div class="metric-cluster-divider" aria-hidden="true"></div>
+
+          <div class="metric-cluster">
+            <h4 class="metric-cluster-title">Admin login</h4>
+            <p class="muted-note muted-note--compact network-subpanel-help">Saved with Wi-Fi below. Leave password blank to keep the current one.</p>
+            <div id="adminCredentialsStatus" class="status info" style="display:none;"></div>
+            <div class="network-field-grid network-field-grid--pairs">
+              <div class="network-field-span-full">
+                <label for="adminUsername">Username</label>
+                <input id="adminUsername" type="text" placeholder="admin" autocomplete="username" />
+              </div>
+              <div>
+                <label for="adminPassword">New password</label>
+                <input id="adminPassword" type="password" placeholder="Optional" autocomplete="new-password" data-password="true" />
+              </div>
+              <div>
+                <label for="adminPasswordConfirm">Confirm password</label>
+                <input id="adminPasswordConfirm" type="password" placeholder="Match new password" autocomplete="new-password" data-password="true" />
+              </div>
+            </div>
+          </div>
+
+          <div class="metric-cluster-divider" aria-hidden="true"></div>
+
+          <div class="metric-cluster">
+            <h4 class="metric-cluster-title">Wi-Fi</h4>
+            <p class="muted-note muted-note--compact network-subpanel-help">SSID required. Password optional on open networks.</p>
+            <div class="network-field-grid network-field-grid--pairs">
+              <div>
+                <label for="ssid">Network name (SSID)</label>
+                <input id="ssid" type="text" placeholder="Your Wi-Fi name" autocomplete="off" required />
+              </div>
+              <div>
+                <label for="password">Wi-Fi password</label>
+                <input id="password" type="password" placeholder="Optional on open networks" autocomplete="off" data-password="true" />
+              </div>
+            </div>
+          </div>
+
+          <div class="network-form-actions">
+            <button class="btn" type="submit">Save&nbsp;&amp;&nbsp;Reboot</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="settings-card metric-board metric-board--dense settings-section-mining">
+        <h2 class="metric-board-title">Solo Mining</h2>
+        <p class="muted-note">
+          Blocks found by the local DATUM Gateway pay this Bitcoin address in the coinbase transaction.
+        </p>
+
+        <div id="miningPayoutStatus" class="status info" style="display:none;"></div>
+
+        <div class="metric-cluster">
+          <h4 class="metric-cluster-title">Payout address</h4>
+          <form id="miningPayoutForm" autocomplete="off">
+            <label for="miningPayoutAddress">Bitcoin payout address</label>
+            <input id="miningPayoutAddress" type="text" inputmode="text" spellcheck="false" placeholder="bc1..." autocomplete="off" />
+            <div class="muted-note muted-note--compact btn-spaced">
+              Changing this updates DATUM solo mining config and restarts the mining services.
+            </div>
+            <button class="btn secondary btn-spaced" type="submit">Save payout address</button>
+          </form>
+        </div>
+
+        <div class="metric-cluster-divider" aria-hidden="true"></div>
+
+        <div class="metric-cluster mining-simulation-panel">
+          <h4 class="metric-cluster-title">Mining simulation</h4>
+          <label class="settings-checkbox-label">
+            <input id="miningSimulationToggle" type="checkbox" autocomplete="off" />
+            <span class="muted-note muted-note--compact muted-note--block">
+              Enables <code>piaxe-miner</code> with <code>config.blockvase.simulate.yml</code>: real Stratum to the local DATUM Gateway and Knots GBT pipeline, while nonces are searched on the CPU instead of BM1366 hardware.
+              Turn off for a normal PiAxe. The miner runs for board monitoring by default; hashing needs a saved payout address and <code>ENABLE_SYSTEM_ACTIONS=true</code>.
+            </span>
+          </label>
+          <p id="miningSimulationEnvNote" class="muted-note muted-note--compact btn-spaced" style="display:none;"></p>
+          <button type="button" class="btn secondary btn-spaced-lg" id="saveMiningSimulationBtn">
+            Save simulation setting
+          </button>
+          <div id="miningSimulationStatus" class="status info" style="display:none;"></div>
+        </div>
+      </div>
+
+      </div><!-- .settings-config-main -->
+
+      <div class="settings-config-sidebar">
+      <div class="settings-card metric-board metric-board--dense settings-section-appearance">
+        <h2 class="metric-board-title">Appearance</h2>
+        <div class="metric-cluster">
+          <label for="theme">Theme</label>
+          <select id="theme" aria-label="Theme">
+            <option value="default">Default (Bitcoin)</option>
+            <option value="ocean">Ocean</option>
+          </select>
+          <button type="button" class="btn secondary btn-spaced" id="saveThemeBtn">Save theme</button>
+        </div>
+      </div>
+
+      <div class="settings-card metric-board metric-board--dense settings-section-system">
+        <h2 class="metric-board-title">System</h2>
+        <div class="settings-system-clusters">
+          <div class="metric-cluster">
+            <h4 class="metric-cluster-title">Device</h4>
+            <dl class="metric-kv-compact">
+              <dt>Uptime</dt><dd id="uptime">-</dd>
+              <dt>Free memory</dt><dd id="freeHeap">-</dd>
+              <dt>IP address</dt><dd class="portal-kpi-value--mono settings-kv-mono" id="ipAddress">-</dd>
+            </dl>
+          </div>
+          <div class="metric-cluster-divider" aria-hidden="true"></div>
+          <div class="metric-cluster">
+            <h4 class="metric-cluster-title">Network</h4>
+            <dl class="metric-kv-compact">
+              <dt>Wi-Fi</dt><dd id="wifiStatusText">-</dd>
+            </dl>
+          </div>
+          <div class="metric-cluster-divider" aria-hidden="true"></div>
+          <div class="metric-cluster">
+            <h4 class="metric-cluster-title">Bitcoin Knots</h4>
+            <dl class="metric-kv-compact">
+              <dt>Block height</dt><dd class="settings-kv-highlight" id="blockHeight">-</dd>
+              <dt>Blocks found</dt><dd id="blocksFound">-</dd>
+              <dt>Largest block</dt><dd id="largestBlock">-</dd>
+              <dt>RPC endpoint</dt><dd class="portal-kpi-value--mono settings-kv-mono" id="rpcNodeInfo">-</dd>
+              <dt>Status</dt><dd id="bitcoinNode">-</dd>
+              <dt>Version</dt><dd class="portal-kpi-value--mono settings-kv-mono" id="bitcoinNodeVersion">-</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-card metric-board metric-board--dense settings-section-actions">
+        <h2 class="metric-board-title">Actions</h2>
+        <div id="actionStatus" class="status info" style="display:none;"></div>
+        <div class="metric-cluster">
+          <h4 class="metric-cluster-title">Testing</h4>
+          <div class="settings-actions-buttons settings-actions-buttons--pair" role="group" aria-label="Simulation actions">
+            <button type="button" class="btn secondary" onclick="simulateBlock()">Simulate block</button>
+            <button type="button" class="btn secondary" onclick="simulateMinerBlock()">Simulate miner block</button>
+          </div>
+        </div>
+        <div class="metric-cluster-divider" aria-hidden="true"></div>
+        <div class="metric-cluster">
+          <h4 class="metric-cluster-title">Device</h4>
+          <div class="settings-actions-buttons settings-actions-buttons--pair" role="group" aria-label="Device actions">
+            <button type="button" class="btn secondary" id="updateDeviceBtn" onclick="updateDevice()" title="Update device">Update device</button>
+            <button type="button" class="btn secondary" onclick="reboot()">Reboot</button>
+          </div>
+          <div class="settings-actions-buttons settings-actions-buttons--stack" role="group" aria-label="Factory reset">
+            <button type="button" class="btn danger" onclick="factoryReset()">Factory reset</button>
+          </div>
+        </div>
+      </div>
+      </div><!-- .settings-config-sidebar -->
+
+      </div><!-- .settings-config-row -->
+
+      </div>
+    </div>
+    <script>
+      (function () {
+        var el = document.getElementById("portalSplashOverlay") || document.querySelector(".portal-splash-overlay");
+        if (!el) return;
+        function finish() {
+          el.classList.add("portal-splash-overlay--gone");
+        }
+        function fadeOut() {
+          el.classList.add("portal-splash-overlay--hide");
+          el.addEventListener("transitionend", finish, { once: true });
+          setTimeout(finish, 600);
+        }
+        function schedule() {
+          setTimeout(fadeOut, 300);
+        }
+        if (document.readyState === "complete") schedule();
+        else window.addEventListener("load", schedule);
+      })();
+    </script>
+    <script src="/static/device-update.js"></script>
+    <script src="/static/settings.js"></script>
+  </body>
+</html>

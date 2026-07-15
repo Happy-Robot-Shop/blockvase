@@ -1,0 +1,8 @@
+[Unit]
+Description=Blockvase Wi-Fi online check (recover to setup AP if offline)
+After=NetworkManager.service blockvase-ap.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=__PROJECT_DIR__/scripts/ap-mode.sh check-online

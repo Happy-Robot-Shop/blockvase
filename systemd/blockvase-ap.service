@@ -1,0 +1,16 @@
+[Unit]
+Description=Blockvase first-boot WiFi AP mode (NetworkManager)
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+# Finish identity refresh + root expand before the node, portal, or kiosk start.
+Before=bitcoind.service blockvase.service blockvase-kiosk.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/scripts/ap-mode.sh ensure
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

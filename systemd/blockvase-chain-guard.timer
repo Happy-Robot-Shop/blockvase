@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic Blockvase bitcoind chain corruption guard
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

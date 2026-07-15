@@ -1,0 +1,11 @@
+[Unit]
+Description=Switch active VT to tty7 before Blockvase kiosk (hide tty1 login/kernel text on HDMI)
+# Kiosk uses TTYPath=/dev/tty7; until startx runs, tty7 is usually blank while tty1 shows getty.
+DefaultDependencies=yes
+After=sysinit.target
+Before=blockvase-kiosk.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/chvt 7
+RemainAfterExit=yes

@@ -1,0 +1,44 @@
+[Unit]
+Description=Blockvase HDMI kiosk
+After=blockvase.service
+# Wants (not Requires): show X/Chromium even if the Flask unit is slow or failed; kiosk-session waits on HTTP.
+Wants=blockvase.service
+After=blockvase-ap.service
+# User D-Bus + XDG_RUNTIME_DIR live under /run/user/<uid> (needs loginctl linger + user@.service).
+After=user@__USER_UID__.service
+Wants=user@__USER_UID__.service
+# Run chvt 7 so HDMI shows the blank VT the kiosk will use (not tty1 getty/messages).
+After=blockvase-switch-to-kiosk-vt.service
+Wants=blockvase-switch-to-kiosk-vt.service
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+# systemd does not load the user's supplementary groups unless listed here: without
+# "tty", Xorg cannot open /dev/ttyN (xf86OpenConsole: Permission denied).
+# "video"/"input" for DRM and input devices on the Pi.
+SupplementaryGroups=tty video input
+WorkingDirectory=__PROJECT_DIR__
+# startx/xinit need a controlling console (stdin on a VT). Without this, X fails with
+# "Cannot open virtual console" / "Couldn't get a file descriptor referring to the console".
+StandardInput=tty
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+StandardOutput=journal
+StandardError=journal
+Environment=DISPLAY=:0
+# Use the real user runtime dir (not a private /run/blockvase-kiosk) so Chromium/logind D-Bus
+# clients do not warn "No session for pid" when talking to the user session bus.
+Environment=XDG_RUNTIME_DIR=/run/user/__USER_UID__
+Environment=NO_AT_BRIDGE=1
+# 90° counter-clockwise kiosk (Pi KMS often ignores config.txt display_rotate: use X11 rotation).
+Environment=BLOCKVASE_KIOSK_XRANDR_ROTATE=left
+# vt7: avoid tty1 (agetty). stdin is already tty7 via TTYPath=: keep server on same VT.
+ExecStart=/usr/bin/startx __PROJECT_DIR__/scripts/kiosk-session.sh -- :0 vt7 -br -nocursor
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

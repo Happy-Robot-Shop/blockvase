@@ -1,0 +1,11 @@
+[Unit]
+Description=Blockvase bitcoind chain corruption guard
+Documentation=file://__PROJECT_DIR__/scripts/chain-guard.sh
+After=network-online.target bitcoind.service
+Wants=bitcoind.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/scripts/chain-guard.sh auto
+Nice=10

@@ -1,0 +1,68 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+# Project config (contains secrets)
+data/config.json
+
+# DATUM Gateway local cmake build (bootstrap)
+datum_gateway/build-blockvase/
+
+# Logs
+logs/
+*.log
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# ESP-IDF / firmware build artifacts
+firmware/**/build/
+firmware/**/managed_components/
+sdkconfig.old
+
+# IDE / editor
+.cursor/
+.cursor-server/
+*.bak
+*.swp
+*~
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Home-directory / user files (repo lives in $HOME)
+.Xauthority
+.bash_history
+.bash_logout
+.bashrc
+.lesshst
+.local/
+.profile
+.sudo_as_admin_successful
+.cache/
+.config/
+.gitconfig
+snap/
+Desktop/
+Documents/
+Downloads/
+Music/
+Pictures/
+Public/
+Templates/
+Videos/

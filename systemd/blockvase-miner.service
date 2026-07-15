@@ -1,0 +1,19 @@
+[Unit]
+Description=PiAxe-miner (Blockvase bundled stratum client → DATUM Gateway)
+After=network-online.target bitcoind.service datum-gateway.service
+Wants=network-online.target
+# No Requires/Wants on datum-gateway: miner stays up for board/ASIC monitoring when
+# DATUM is off (no payout address yet). set-mining-payout enables DATUM for hashing.
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+WorkingDirectory=__PROJECT_DIR__/piaxe-miner
+EnvironmentFile=-/etc/blockvase/miner.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__PROJECT_DIR__/scripts/blockvase-miner-run.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

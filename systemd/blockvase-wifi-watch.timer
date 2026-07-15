@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically check Blockvase home Wi-Fi (recover to setup AP if offline)
+After=NetworkManager.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,146 @@
+<!doctype html>
+{% set critical_bg = '#051420' if (theme | default('')) == 'ocean' else '#0a0604' %}
+<html lang="en" style="background-color: {{ critical_bg }};">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="{{ critical_bg }}" />
+    <title>{{ title | default('Blockvase Display') }}</title>
+    <link rel="icon" href="/media/logo_64.png" type="image/png" />
+    <style>
+      /* Critical paint before /static/style.css: avoid white UA canvas / unstyled panels */
+      html {
+        margin: 0;
+        min-height: 100%;
+        background-color: #0a0604;
+      }
+      body {
+        margin: 0;
+        min-height: 100%;
+        background-color: #0a0604;
+      }
+      body[data-theme="ocean"] {
+        background-color: #051420;
+      }
+      html:has(body[data-theme="ocean"]) {
+        background-color: #051420;
+      }
+      main.display-shell,
+      .display-shell,
+      .panel.setup-screen,
+      .panel.live-screen,
+      .panel.update-screen,
+      #mempool-treemap {
+        background-color: #0a0604;
+      }
+      body[data-theme="ocean"] main.display-shell,
+      body[data-theme="ocean"] .display-shell,
+      body[data-theme="ocean"] .panel.setup-screen,
+      body[data-theme="ocean"] .panel.live-screen,
+      body[data-theme="ocean"] .panel.update-screen,
+      body[data-theme="ocean"] #mempool-treemap {
+        background-color: #051420;
+      }
+      /* Same as style.css .hidden: panels stay hidden until stylesheet loads */
+      .hidden {
+        display: none !important;
+      }
+      /* Kiosk boot: panels hidden until display.js picks setup / update / live */
+      body.display-kiosk .setup-screen,
+      body.display-kiosk .live-screen,
+      body.display-kiosk .update-screen {
+        display: none !important;
+      }
+      body.display-kiosk .setup-screen:not(.hidden),
+      body.display-kiosk .live-screen:not(.hidden),
+      body.display-kiosk .update-screen:not(.hidden) {
+        display: flex !important;
+      }
+    </style>
+    {# Load full stylesheet without blocking first paint (blocking link shows white until CSS downloads). #}
+    <link rel="stylesheet" href="/static/style.css" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="/static/style.css" /></noscript>
+  </head>
+  <body class="display-page {% if interactive %}mempool-interactive{% else %}display-kiosk{% endif %}" style="background-color: {{ critical_bg }};" data-theme="{{ theme | default('default') }}"{% if mempool_tx_limit is not none %} data-mempool-tx-limit="{{ mempool_tx_limit }}"{% endif %}>
+    <div class="portal-splash-overlay" id="portalSplashOverlay" aria-hidden="true"></div>
+    {% if interactive %}<button type="button" class="mempool-fullscreen" id="mempoolFullscreen" aria-label="Fullscreen">⛶</button>{% endif %}
+    <section id="sync-status-overlay" class="sync-status-overlay hidden" aria-live="polite" aria-label="Blockchain sync status">
+      <div class="sync-status-inner sync-startup-board">
+        <header class="sync-startup-header">
+          <h2 id="sync-status-title" class="sync-status-title">Bitcoin Knots is starting</h2>
+          <p id="sync-status-sub" class="sync-status-sub muted-note muted-note--compact">Metrics will appear when the node is ready.</p>
+        </header>
+        <div
+          id="sync-progress-wrap"
+          class="sync-progress-outer sync-startup-progress"
+          role="progressbar"
+          aria-hidden="true"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+          aria-label="Chain verification progress"
+        >
+          <div id="sync-progress-bar" class="sync-progress-bar"></div>
+        </div>
+        <div class="sync-metrics sync-startup-kpi-grid" id="sync-metrics-grid">
+          <div id="sync-metric-blocks" class="sync-metric-cell sync-startup-kpi"></div>
+          <div id="sync-metric-headers" class="sync-metric-cell sync-startup-kpi"></div>
+          <div id="sync-metric-progress" class="sync-metric-cell sync-startup-kpi"></div>
+          <div id="sync-metric-disk" class="sync-metric-cell sync-startup-kpi"></div>
+          <div id="sync-metric-peers" class="sync-metric-cell sync-startup-kpi"></div>
+        </div>
+      </div>
+    </section>
+    <main class="container display-shell">
+      <section id="setup-screen" class="panel setup-screen{% if not interactive %} hidden{% endif %}">
+        <center class="setup-content">
+          <img id="setup-qr" class="qr" src="/api/setup-qr.svg" alt="Setup QR code" />
+          <p id="setup-stage-label" class="sub">Scan to connect to the Blockvase setup Wi-Fi</p>
+        </center>
+      </section>
+
+      <section id="update-screen" class="panel update-screen hidden" aria-live="polite" aria-label="Device update">
+        <div class="update-content setup-content">
+          <div class="loading-spinner" id="update-screen-spinner" aria-hidden="true"></div>
+          <h2 id="update-screen-title" class="sync-status-title">Updating Blockvase</h2>
+          <p id="update-screen-message" class="sync-status-sub muted-note muted-note--compact">Pulling the latest software. This can take several minutes.</p>
+        </div>
+      </section>
+
+      <section id="live-screen" class="panel live-screen hidden mempool-screen">
+        <div id="mempool-treemap" class="mempool-treemap">
+          <canvas id="mempool-canvas" class="mempool-canvas" aria-label="Live mempool treemap"></canvas>
+        </div>
+        {% if interactive %}<div id="tx-tooltip" class="tx-tooltip" aria-hidden="true"></div>{% endif %}
+      </section>
+    </main>
+    <script>
+      (function () {
+        var el = document.getElementById("portalSplashOverlay") || document.querySelector(".portal-splash-overlay");
+        if (!el) return;
+        function finish() {
+          el.classList.add("portal-splash-overlay--gone");
+        }
+        function fadeOut() {
+          if (el.classList.contains("portal-splash-overlay--hide")) return;
+          el.classList.add("portal-splash-overlay--hide");
+          el.addEventListener("transitionend", finish, { once: true });
+          setTimeout(finish, 600);
+        }
+        /* Kiosk: stay black until display.js resolves setup vs live state. */
+        if (document.body.classList.contains("display-kiosk")) {
+          window.dismissDisplayBootSplash = fadeOut;
+          return;
+        }
+        function schedule() {
+          setTimeout(fadeOut, 300);
+        }
+        if (document.readyState === "complete") schedule();
+        else window.addEventListener("load", schedule);
+      })();
+    </script>
+    <script src="/static/display.js"></script>
+  </body>
+</html>
+

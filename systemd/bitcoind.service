@@ -1,0 +1,22 @@
+[Unit]
+Description=Bitcoin Knots (full archival node, local JSON-RPC)
+Documentation=https://github.com/bitcoinknots/bitcoin/releases/tag/v29.3.knots20260508
+After=network-online.target
+Wants=network-online.target
+# Wait for clone-safety / root expand / AP handoff in blockvase-ap before opening the chain DB.
+After=blockvase-ap.service
+Wants=blockvase-ap.service
+
+[Service]
+Type=simple
+User=bitcoin
+Group=bitcoin
+ExecStart=/usr/local/bin/bitcoind -conf=/etc/bitcoin/bitcoin.conf -datadir=/var/lib/bitcoind
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=infinity
+LimitNOFILE=65536
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
