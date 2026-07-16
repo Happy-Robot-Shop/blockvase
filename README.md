@@ -1,12 +1,16 @@
-# Blockvase
-
 <p align="center">
-  <img src="media/gh-banner.png" alt="Blockvase" width="640" />
+  <img src="media/gh-banner.png" alt="Blockvase" width="720" />
+  <br /><br />
+  <b>Blockvase</b><br />
+  Full Bitcoin Knots Node, DATUM Gateway &amp; ASIC Miner<br />
+  <a href="https://blockvase.com">blockvase.com</a>
+  ·
+  <a href="#path-a-fresh-install">Fresh install</a>
+  ·
+  <a href="#license">License</a>
 </p>
 
-## Full Bitcoin Knots Node, DATUM Gateway & ASIC Miner
-
-### The product
+## The product
 
 The following describes the **pre-assembled, chain-synced Blockvase** sold at [blockvase.com](https://blockvase.com):
 
@@ -18,7 +22,7 @@ A smooth glass-covered display shows current sync status during initial block do
 
 Setup is quick and easy. Just plug in the device, press the button on the back inside the vent hole, and scan the QR code to begin. You'll be connected to the device's onboard access point and scan one more QR code to connect the device to your network via 2.4GHz WiFi for maximum range.
 
-### This repository
+## This repository
 
 We have **open-sourced the entire Blockvase stack** (software and hardware) so anyone can build their own, inspect every layer, and verify that what runs on the device matches what is published here. Portal, kiosk, Bitcoin Knots install, DATUM Gateway, PiAxe-miner, device scripts, and the modified PiAxe HAT design (`hardware/piaxe/`) all live in this repo. Prefer a finished unit? Get one at [blockvase.com](https://blockvase.com).
 
