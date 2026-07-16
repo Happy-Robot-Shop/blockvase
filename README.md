@@ -1,5 +1,9 @@
 # Blockvase
 
+<p align="center">
+  <img src="media/gh-social.png" alt="Blockvase" width="640" />
+</p>
+
 ## Full Bitcoin Knots Node, DATUM Gateway & ASIC Miner
 
 ### The product
