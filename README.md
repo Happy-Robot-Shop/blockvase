@@ -29,6 +29,24 @@ To build from this repo on a Raspberry Pi, start with **[Path A: Fresh install](
 | **Node** | [Bitcoin Knots](https://github.com/bitcoinknots/bitcoin/releases/tag/v29.3.knots20260508) (full archival, local RPC only) |
 | **Mining** | Local [DATUM Gateway](https://github.com/OCEAN-xyz/datum_gateway) (solo from Knots GBT) + BM1366 (PiAxe); Stratum v1 only to localhost |
 | **Buy** | Pre-assembled & synced: [blockvase.com](https://blockvase.com) |
+| **License** | GPL-3.0 for Blockvase-authored software and HAT design; see [License](#license) |
+
+---
+
+## License
+
+Blockvase-authored software (`app/`, `scripts/`, `static/`, `templates/`, `systemd/`, and related) and the Blockvase PiAxe-derived HAT (`hardware/piaxe/`) are licensed under the **GNU General Public License version 3**. The full text is in [`LICENSE`](LICENSE). Copyright and third-party notices are in [`NOTICE`](NOTICE).
+
+This repository also vendors components under their own terms:
+
+| Component | Path | License |
+|-----------|------|---------|
+| DATUM Gateway | `datum_gateway/` | MIT (`datum_gateway/LICENSE`); trademarks not included |
+| piaxe-miner (incl. PyMiner ancestry) | `piaxe-miner/` | GPL-3.0 (`piaxe-miner/LICENSE.txt`); some files keep historical MIT headers |
+| PiAxe HAT (Blockvase derivative) | `hardware/piaxe/` | GPL-3.0 (derived from [shufps/piaxe](https://github.com/shufps/piaxe)) |
+| Bitcoin Knots | installed by script, not vendored here | MIT (upstream) |
+
+**Corresponding Source** for GPL-covered software shipped on Blockvase devices is this public repository: [github.com/Happy-Robot-Shop/blockvase](https://github.com/Happy-Robot-Shop/blockvase). Devices that keep the project tree also carry that source locally (typically under the `blockvase` user home directory). The portal Settings screen links to the same source offer.
 
 ---
 
@@ -133,7 +151,7 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 | **Project** | [piaxe-miner](https://github.com/shufps/piaxe-miner) by [shufps](https://github.com/shufps) / [OSMU](https://osmu.wiki/); hardware from [PiAxe](https://github.com/shufps/piaxe) |
 | **Hardware** | Blockvase PiAxe-derived BM1366 HAT (see `hardware/piaxe/`); upstream design by [shufps](https://github.com/shufps) / [OSMU](https://osmu.wiki/); see [D-Central](#d-central-technologies) for PiAxe manufacturing credit |
 | **Lineage** | Software: fork of [PyMiner](https://github.com/crypto-jeronimo/pyminer) (SHA256d stratum client); piaxe-miner added Python 3, PiAxe/QAxe drivers, reconnect logic. Hardware: OSMU PiAxe HAT, redesigned for Blockvase power delivery |
-| **License** | Software: GPL-3.0 (see `piaxe-miner/LICENSE.txt`). Hardware: see `hardware/piaxe/` |
+| **License** | Software: GPL-3.0 (`piaxe-miner/LICENSE.txt`). Hardware: GPL-3.0 (`hardware/piaxe/`, derived from PiAxe) |
 | **Role in Blockvase** | On-device BM1366 hashing + board control: PiAxe-miner speaks Stratum v1 only to local DATUM Gateway; REST/LM75 stats for the portal |
 
 **How we use it**

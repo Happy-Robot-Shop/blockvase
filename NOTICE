@@ -1,0 +1,72 @@
+Blockvase
+Copyright (C) 2026 Happy Robot Shop
+
+This repository is a multi-license distribution. The GNU General Public License
+version 3 (GPL-3.0) is the license for Blockvase-authored software and for the
+Blockvase PiAxe-derived hardware design, unless a file or subdirectory says
+otherwise. The full GPL-3.0 text is in LICENSE.
+
+==============================================================================
+Blockvase-authored works (GPL-3.0)
+==============================================================================
+
+Unless noted below, original Blockvase code and docs in this repository are
+licensed under GPL-3.0, including for example:
+
+  app/
+  scripts/
+  static/
+  templates/
+  systemd/
+  hardware/piaxe/   (design files; derived from OSMU PiAxe, also GPL-3.0)
+
+Corresponding Source for software shipped on Blockvase devices is this public
+repository:
+
+  https://github.com/Happy-Robot-Shop/blockvase
+
+On a device that still has the project tree, the same source is typically under
+the Blockvase home directory (for example ~/blockvase). Settings in the portal
+also points at this source offer.
+
+==============================================================================
+Third-party / vendored components
+==============================================================================
+
+DATUM Gateway (OCEAN)
+  Path:     datum_gateway/
+  License:  MIT (see datum_gateway/LICENSE)
+  Note:     DATUM / OCEAN trademarks are not licensed by that MIT grant.
+
+piaxe-miner (shufps / OSMU) and PyMiner ancestry
+  Path:     piaxe-miner/
+  License:  GPL-3.0 for the piaxe-miner distribution (see piaxe-miner/LICENSE.txt)
+  Note:     Some files retain historical MIT headers from PyMiner
+            (https://github.com/crypto-jeronimo/pyminer). Those MIT terms still
+            apply to the MIT-licensed portions; the combined piaxe-miner work
+            is distributed under GPL-3.0. Blockvase modifications are described
+            in README.md (Credits).
+
+PiAxe hardware (upstream)
+  Upstream: https://github.com/shufps/piaxe (GPL-3.0)
+  Blockvase derivative design files: hardware/piaxe/ (GPL-3.0)
+
+Bitcoin Knots
+  Not vendored as source here. Installed from upstream release tarballs by
+  scripts/install-bitcoin-knots.sh. Upstream license: MIT (see Knots COPYING).
+
+Python dependencies
+  Installed into .venv from requirements.txt (Flask, Waitress, requests, qrcode,
+  and their dependencies). Each package retains its own license.
+
+Credit logos (media/credits/)
+  Used for attribution only. Trademarks remain with their owners and are not
+  licensed by GPL-3.0 or by this NOTICE.
+
+==============================================================================
+No warranty
+==============================================================================
+
+Software and hardware design files are provided without warranty as described
+in the applicable licenses (GPL-3.0 section 15 and 16; MIT disclaimer in
+datum_gateway/LICENSE where that license applies).

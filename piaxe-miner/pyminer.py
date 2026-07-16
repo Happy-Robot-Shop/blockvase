@@ -19,6 +19,12 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
+#
+# Modified for Blockvase (Happy Robot Shop), 2026.
+# Notable changes: allow board monitoring with an empty Stratum user / no payout
+# address yet; skip hashing until payout is configured. See repository README
+# Credits. piaxe-miner as distributed here is under GPL-3.0
+# (see LICENSE.txt); MIT terms above still apply to the original PyMiner portions.
 
 import json, socket, sys, threading, time
 from urllib import parse as urlparse

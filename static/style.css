@@ -4783,6 +4783,23 @@ body[data-theme="ocean"] .radial-metric--accent .radial-metric-value {
  color: var(--muted);
 }
 
+.settings-license-blurb {
+ margin: 0;
+ font-size: var(--portal-text-caption);
+ line-height: 1.45;
+ color: var(--muted);
+}
+
+.settings-license-blurb a {
+ color: var(--text);
+ text-decoration: underline;
+ text-underline-offset: 2px;
+}
+
+.settings-license-blurb code {
+ font-size: 0.95em;
+}
+
 .metric-cluster .metric-kv-compact {
  margin: 0;
 }

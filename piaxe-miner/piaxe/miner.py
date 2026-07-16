@@ -1,4 +1,7 @@
-
+# piaxe-miner board/ASIC control (GPL-3.0; see ../LICENSE.txt).
+# Modified for Blockvase (Happy Robot Shop), 2026: soft-fail board/GPIO/I2C and
+# ASIC init so LM75/REST monitoring can continue without hashing. See repository
+# README Credits for the full modification list.
 
 import serial
 import time
