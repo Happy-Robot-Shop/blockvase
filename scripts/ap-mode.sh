@@ -26,6 +26,17 @@ WLAN_IFACE="${BLOCKVASE_WLAN_IFACE:-wlan0}"
 HOTSPOT_CONN="blockvase-hotspot"
 CLIENT_CONN="blockvase-home"
 CLONE_SAFETY="${PROJECT_DIR}/scripts/clone-safety.sh"
+NETWORK_GATE="${PROJECT_DIR}/scripts/bitcoind-network-gate.sh"
+
+apply_bitcoind_network_gate() {
+  if [[ -x "${NETWORK_GATE}" ]]; then
+    "${NETWORK_GATE}" apply || echo "ap-mode: warning: bitcoind network gate apply failed"
+  elif [[ -f "${NETWORK_GATE}" ]]; then
+    echo "ap-mode: warning: ${NETWORK_GATE} exists but is not executable"
+  else
+    echo "ap-mode: warning: ${NETWORK_GATE} missing"
+  fi
+}
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Must run as root"
@@ -273,6 +284,7 @@ PY
   stop_hotspot
   sleep 1
   start_hotspot "${cfg[1]}" "${cfg[2]}"
+  apply_bitcoind_network_gate
 }
 
 # Used by NetworkManager dispatcher / wifi-watch timer.
@@ -353,6 +365,7 @@ main() {
       sleep 1
       start_hotspot "${cfg[1]}" "${cfg[2]}"
       install_wifi_watchers
+      apply_bitcoind_network_gate
       ;;
     install-wifi-watchers)
       install_wifi_watchers
@@ -387,12 +400,14 @@ main() {
           fi
         fi
       fi
+      apply_bitcoind_network_gate
       ;;
     check-online)
       check_online
       ;;
     after-factory-reset)
       after_factory_reset
+      apply_bitcoind_network_gate
       ;;
     start)
       mapfile -t cfg < <(read_cfg)

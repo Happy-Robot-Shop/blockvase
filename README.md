@@ -351,7 +351,7 @@ Phone / browser / HDMI kiosk
 At a glance:
 
 - The **portal** (`blockvase.service`) serves the UI and APIs.
-- The **node** (`bitcoind`) stores the chain under `/var/lib/bitcoind`.
+- The **node** (`bitcoind`) stores the chain under `/var/lib/bitcoind`. P2P sync stays off until home Wi-Fi is configured (`setup_complete` + `wifi_ssid`), so an ethernet-only / AP-setup master does not grow the chain; after setup Wi-Fi is saved, sync runs normally.
 - **Solo mining** is DATUM Gateway + local Knots (block templates). PiAxe uses Stratum v1 only as the local cable to DATUM on `127.0.0.1:23334`. This is not pool Stratum mining.
 - The **kiosk** is a full-screen Chromium session on HDMI (not the Pi desktop).
 - **Setup networking** uses a temporary hotspot, then a saved home Wi-Fi profile.

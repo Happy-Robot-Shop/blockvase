@@ -165,9 +165,18 @@ if [[ -f "${CONFIG_JSON}" ]] && command -v jq >/dev/null 2>&1; then
   echo "Updated ${CONFIG_JSON} rpc block for local Knots."
 fi
 
+GATE_SCRIPT="${PROJECT_DIR}/scripts/bitcoind-network-gate.sh"
+if [[ -x "${GATE_SCRIPT}" ]]; then
+  "${GATE_SCRIPT}" prepare-start || true
+elif [[ -f "${GATE_SCRIPT}" ]]; then
+  chmod +x "${GATE_SCRIPT}"
+  "${GATE_SCRIPT}" prepare-start || true
+fi
+
 systemctl daemon-reload
 systemctl enable bitcoind.service
 systemctl restart bitcoind.service || systemctl start bitcoind.service || true
 
 echo "Bitcoin Knots installed. Status: systemctl status bitcoind.service"
 echo "CLI: sudo -u bitcoin bitcoin-cli -conf=${CONF} getblockchaininfo"
+echo "P2P sync is gated until home Wi-Fi is configured (see bitcoind-network-gate.sh)."

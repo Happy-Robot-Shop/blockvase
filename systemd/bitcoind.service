@@ -11,7 +11,10 @@ Wants=blockvase-ap.service
 Type=simple
 User=bitcoin
 Group=bitcoin
-ExecStart=/usr/local/bin/bitcoind -conf=/etc/bitcoin/bitcoin.conf -datadir=/var/lib/bitcoind
+# P2P gate: write args, then start with -networkactive=0|1 (see bitcoind-network-gate.sh).
+# Args file is read at ExecStart (not EnvironmentFile) so ExecStartPre updates apply this boot.
+ExecStartPre=+/home/blockvase/blockvase/scripts/bitcoind-network-gate.sh prepare-start
+ExecStart=/bin/bash -c 'extra=$(cat /etc/bitcoin/blockvase-network-gate.args 2>/dev/null || true); [[ -n "$extra" ]] || extra="-networkactive=0"; exec /usr/local/bin/bitcoind -conf=/etc/bitcoin/bitcoin.conf -datadir=/var/lib/bitcoind $extra'
 Restart=on-failure
 RestartSec=30
 TimeoutStartSec=infinity
