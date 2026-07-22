@@ -283,7 +283,7 @@ function renderPortalSyncStatus(el, syncState) {
   if (syncState.initialblockdownload === true) text = "Initial block download";
   if (pct != null) text += ": " + pct + "% verified";
   if (blocks != null && Number.isFinite(blocks)) text += " · block " + formatNumber(blocks);
-  el.innerHTML = '<span class="status-badge status-syncing">' + escapeHtml(text) + "</span>";
+  setPortalStatusBadge(el, "syncing", text);
 }
 
 function syncPendingKpiValue(syncState, field) {
@@ -295,6 +295,10 @@ function syncPendingKpiValue(syncState, field) {
 }
 
 function renderPortalSyncPendingMetrics(syncState, statusEl, beforeEl, upperDetailEl) {
+  if (patchPortalSyncPendingMetrics(syncState, statusEl, beforeEl, upperDetailEl)) {
+    return;
+  }
+
   const pending = portalMetricPendingHtml();
   renderPortalSyncStatus(statusEl, syncState);
 
@@ -366,6 +370,7 @@ function renderPortalSyncPendingMetrics(syncState, statusEl, beforeEl, upperDeta
   }
   if (beforeEl) beforeEl.innerHTML = retargetBarPendingHtml();
   if (upperDetailEl) upperDetailEl.innerHTML = compactSecondaryHtml;
+  portalMetricsRenderMode = "sync";
 }
 
 let lastBlockHeight = 0;
@@ -376,6 +381,291 @@ let portalMiningEverRendered = false;
 let portalChainSyncSticky = false;
 let portalMempoolIframeInitialized = false;
 let portalLayoutRevealed = false;
+/** 'sync' | 'live' — avoid full innerHTML rebuilds on every poll (layout flash). */
+let portalMetricsRenderMode = null;
+
+function setPortalStatusBadge(el, kind, text) {
+  if (!el) return;
+  const existing = el.querySelector(".status-badge");
+  const cls = kind === "syncing" ? "status-badge status-syncing" : "status-badge status-connected";
+  if (existing && existing.className === cls) {
+    if (existing.textContent !== text) existing.textContent = text;
+    return;
+  }
+  el.innerHTML = '<span class="' + cls + '">' + escapeHtml(text) + "</span>";
+}
+
+function findPortalKpi(root, label) {
+  if (!root) return null;
+  const kpis = root.querySelectorAll(".portal-kpi");
+  for (let i = 0; i < kpis.length; i++) {
+    const lbl = kpis[i].querySelector(".portal-kpi-label");
+    if (lbl && lbl.textContent === label) return kpis[i];
+  }
+  return null;
+}
+
+function patchPortalKpi(root, label, value, unit) {
+  const kpi = findPortalKpi(root, label);
+  if (!kpi) return false;
+  const valueEl = kpi.querySelector(".portal-kpi-value");
+  if (!valueEl) return false;
+  const valueText = String(value ?? "n/a");
+  const unitText = unit ? String(unit) : "";
+  let unitEl = valueEl.querySelector(".portal-kpi-unit");
+  // Preserve value text node(s); only rewrite when changed.
+  const currentUnit = unitEl ? unitEl.textContent : "";
+  let currentValue = "";
+  valueEl.childNodes.forEach(function (node) {
+    if (node.nodeType === Node.TEXT_NODE) currentValue += node.textContent;
+  });
+  currentValue = currentValue.trim();
+  if (currentValue !== valueText || currentUnit !== unitText) {
+    if (unitText) {
+      valueEl.textContent = "";
+      valueEl.appendChild(document.createTextNode(valueText));
+      unitEl = document.createElement("span");
+      unitEl.className = "portal-kpi-unit";
+      unitEl.textContent = unitText;
+      valueEl.appendChild(unitEl);
+    } else {
+      valueEl.textContent = valueText;
+    }
+  }
+  return true;
+}
+
+function patchPortalKpiPending(root, label) {
+  const kpi = findPortalKpi(root, label);
+  if (!kpi) return false;
+  const valueEl = kpi.querySelector(".portal-kpi-value");
+  if (!valueEl) return false;
+  const pending = valueEl.querySelector(".portal-metric-pending");
+  if (pending && pending.textContent === "After sync") return true;
+  valueEl.innerHTML = portalMetricPendingHtml();
+  return true;
+}
+
+function findMetricDd(root, label) {
+  if (!root) return null;
+  const dts = root.querySelectorAll("dt");
+  for (let i = 0; i < dts.length; i++) {
+    if (dts[i].textContent === label) {
+      const dd = dts[i].nextElementSibling;
+      if (dd && dd.tagName === "DD") return dd;
+    }
+  }
+  return null;
+}
+
+function patchMetricKv(root, label, valueHtmlOrText) {
+  const dd = findMetricDd(root, label);
+  if (!dd) return false;
+  const html =
+    typeof valueHtmlOrText === "string" && valueHtmlOrText.indexOf("<") >= 0
+      ? valueHtmlOrText
+      : metricEscape(String(valueHtmlOrText ?? "n/a"));
+  if (dd.innerHTML !== html) dd.innerHTML = html;
+  return true;
+}
+
+function patchRetargetBar(beforeEl, blocksUntilRetarget, progressPct) {
+  if (!beforeEl) return false;
+  const bar = beforeEl.querySelector(".portal-retarget-bar");
+  if (!bar) return false;
+  const pct = Number(progressPct);
+  const etaHours = ((blocksUntilRetarget * 10) / 60).toFixed(1);
+  const meta = bar.querySelector(".portal-retarget-meta");
+  const track = bar.querySelector(".portal-retarget-track");
+  const fill = bar.querySelector(".portal-retarget-fill");
+  const metaText = progressPct + "% · " + blocksUntilRetarget + " blocks · ~" + etaHours + "h";
+  if (meta && meta.textContent !== metaText) meta.textContent = metaText;
+  if (track) track.setAttribute("aria-valuenow", String(pct));
+  if (fill) {
+    const width = pct + "%";
+    if (fill.style.width !== width) fill.style.width = width;
+  }
+  return true;
+}
+
+function patchFeeStrip(root, low, med, high) {
+  if (!root) return false;
+  const chips = root.querySelectorAll(".metric-fee-chip-value");
+  if (chips.length < 3) return false;
+  const vals = [formatFeeRateCompact(low), formatFeeRateCompact(med), formatFeeRateCompact(high)];
+  for (let i = 0; i < 3; i++) {
+    if (chips[i].textContent !== vals[i]) chips[i].textContent = vals[i];
+  }
+  return true;
+}
+
+function recentBlocksHtml(blocks) {
+  const rows = (blocks || [])
+    .slice()
+    .sort((a, b) => (b.height || 0) - (a.height || 0))
+    .slice(0, 4)
+    .map(
+      (b) => `
+      <div class="portal-mini-block">
+        <div class="portal-mini-block-head">
+          <span class="portal-mini-block-height">#${formatNumber(b.height || 0)}</span>
+          <span class="portal-mini-block-time">${formatTimeAgo(b.timestamp || 0)}</span>
+        </div>
+        <div class="portal-mini-block-stats">
+          <span>${formatNumber(b.tx_count || 0)} tx</span>
+          <span>${formatBytes(b.size || 0)}</span>
+        </div>
+      </div>
+    `
+    )
+    .join("");
+  return rows || '<div class="portal-compact-note">No recent block data.</div>';
+}
+
+function patchRecentBlocks(root, blocks) {
+  if (!root) return false;
+  const host = root.querySelector(".portal-mini-blocks");
+  if (!host) return false;
+  const sorted = (blocks || [])
+    .slice()
+    .sort((a, b) => (b.height || 0) - (a.height || 0))
+    .slice(0, 4);
+  const existing = host.querySelectorAll(".portal-mini-block");
+  const heightsMatch =
+    existing.length === sorted.length &&
+    sorted.every(function (b, i) {
+      const h = existing[i].querySelector(".portal-mini-block-height");
+      return h && h.textContent === "#" + formatNumber(b.height || 0);
+    });
+  if (heightsMatch) {
+    sorted.forEach(function (b, i) {
+      const timeEl = existing[i].querySelector(".portal-mini-block-time");
+      const stats = existing[i].querySelectorAll(".portal-mini-block-stats span");
+      const nextTime = formatTimeAgo(b.timestamp || 0);
+      if (timeEl && timeEl.textContent !== nextTime) timeEl.textContent = nextTime;
+      if (stats[0]) {
+        const tx = formatNumber(b.tx_count || 0) + " tx";
+        if (stats[0].textContent !== tx) stats[0].textContent = tx;
+      }
+      if (stats[1]) {
+        const size = formatBytes(b.size || 0);
+        if (stats[1].textContent !== size) stats[1].textContent = size;
+      }
+    });
+    return true;
+  }
+  const next = recentBlocksHtml(blocks);
+  if (host.innerHTML !== next) host.innerHTML = next;
+  return true;
+}
+
+function portalLiveStructureReady() {
+  const grid = document.getElementById("metricsGrid");
+  const beforeEl = document.getElementById("metricsBeforeMempool");
+  const upperDetailEl = document.getElementById("metricsUpperDetail");
+  return !!(
+    grid &&
+    grid.querySelector(".portal-kpi-strip") &&
+    beforeEl &&
+    beforeEl.querySelector(".portal-retarget-bar") &&
+    upperDetailEl &&
+    upperDetailEl.querySelector("#compactMiningSummary") &&
+    upperDetailEl.querySelector(".portal-mini-blocks")
+  );
+}
+
+function portalSyncStructureReady() {
+  const grid = document.getElementById("metricsGrid");
+  const beforeEl = document.getElementById("metricsBeforeMempool");
+  const upperDetailEl = document.getElementById("metricsUpperDetail");
+  return !!(
+    grid &&
+    grid.querySelector(".portal-kpi-strip") &&
+    beforeEl &&
+    beforeEl.querySelector(".portal-retarget-bar") &&
+    upperDetailEl &&
+    upperDetailEl.querySelector(".portal-metric-pending")
+  );
+}
+
+function patchPortalSyncPendingMetrics(syncState, statusEl, beforeEl, upperDetailEl) {
+  if (portalMetricsRenderMode !== "sync" || !portalSyncStructureReady()) return false;
+  const grid = document.getElementById("metricsGrid");
+  const vp = syncState.verificationprogress != null ? Number(syncState.verificationprogress) : null;
+  const pct = vp != null && Number.isFinite(vp) ? (vp * 100).toFixed(1) : null;
+  const blocks = syncState.blocks != null ? Number(syncState.blocks) : null;
+  let text = "Chain syncing";
+  if (syncState.initialblockdownload === true) text = "Initial block download";
+  if (pct != null) text += ": " + pct + "% verified";
+  if (blocks != null && Number.isFinite(blocks)) text += " · block " + formatNumber(blocks);
+  setPortalStatusBadge(statusEl, "syncing", text);
+
+  if (blocks != null && Number.isFinite(blocks)) {
+    patchPortalKpi(grid, "Height", formatNumber(blocks), "");
+  } else {
+    patchPortalKpiPending(grid, "Height");
+  }
+  ["Difficulty", "Network hash", "Chain size", "Mempool tx", "Peers"].forEach(function (label) {
+    patchPortalKpiPending(grid, label);
+  });
+
+  const verified =
+    vp != null && Number.isFinite(vp) ? (vp * 100).toFixed(1) + "%" : portalMetricPendingHtml();
+  patchMetricKv(upperDetailEl, "Verified", verified);
+  return true;
+}
+
+function patchPortalLiveMetrics(d, statusEl, beforeEl, upperDetailEl) {
+  if (portalMetricsRenderMode !== "live" || !portalLiveStructureReady()) return false;
+  const grid = document.getElementById("metricsGrid");
+  const nodeVer = (d.node_version || d.nodeVersion || "").trim();
+  const statusText = nodeVer
+    ? "Connected to BIP-110 compliant node " + (nodeVer.startsWith("v") ? nodeVer : "v" + nodeVer)
+    : "Connected to BIP-110 compliant node";
+  setPortalStatusBadge(statusEl, "connected", statusText);
+
+  const blocksUntilRetarget = d.blocks_until_retarget ?? 2016;
+  const progressPct = (((2016 - blocksUntilRetarget) / 2016) * 100).toFixed(1);
+  const verifyPct = (d.verificationprogress || 0) * 100;
+  const diffParts = formatDifficultyParts(d.difficulty || 0);
+  const hashParts = formatHashRateParts(d.networkhashps || 0);
+  const chainParts = formatBytesParts(d.size_on_disk || 0);
+  const mempoolParts = formatBytesParts(d.mempool_size || d.mempool_bytes || 0);
+  const nodeVerStr = nodeVer ? (nodeVer.startsWith("v") ? nodeVer : "v" + nodeVer) : "n/a";
+  const mempoolSize = mempoolParts.value + (mempoolParts.unit ? " " + mempoolParts.unit : "");
+
+  if (!patchPortalKpi(grid, "Height", formatNumber(d.blocks || 0), "")) return false;
+  if (!patchPortalKpi(grid, "Difficulty", diffParts.value, diffParts.unit)) return false;
+  if (!patchPortalKpi(grid, "Network hash", hashParts.value, hashParts.unit)) return false;
+  if (!patchPortalKpi(grid, "Chain size", chainParts.value, chainParts.unit)) return false;
+  if (!patchPortalKpi(grid, "Mempool tx", formatNumber(d.mempool_tx || 0), "")) return false;
+  if (!patchPortalKpi(grid, "Peers", formatNumber(d.connections || 0), "")) return false;
+  if (!patchRetargetBar(beforeEl, blocksUntilRetarget, progressPct)) return false;
+
+  patchMetricKv(upperDetailEl, "Verified", verifyPct.toFixed(1) + "%");
+  patchMetricKv(upperDetailEl, "Chain", String(d.chain || "unknown"));
+  patchMetricKv(upperDetailEl, "Pruned", d.pruned ? "Yes" : "No");
+  patchMetricKv(upperDetailEl, "Version", nodeVerStr);
+  patchMetricKv(upperDetailEl, "Size", mempoolSize);
+  patchMetricKv(
+    upperDetailEl,
+    "Min fee",
+    (d.mempool_minfee || 0).toFixed(8) + ' <span class="portal-kv-unit">BTC/kB</span>'
+  );
+  patchFeeStrip(upperDetailEl, d.fee_low, d.fee_medium, d.fee_high);
+  patchRecentBlocks(upperDetailEl, d.recent_blocks);
+
+  if (d.blocks > lastBlockHeight && lastBlockHeight > 0) {
+    const firstBlock = upperDetailEl.querySelector(".portal-mini-block");
+    if (firstBlock) {
+      const themeClass = "new-block-orange";
+      firstBlock.classList.add(themeClass);
+      setTimeout(() => firstBlock.classList.remove(themeClass), 1200);
+    }
+  }
+  lastBlockHeight = d.blocks;
+  return true;
+}
 
 function chainSyncSignalsPending(d) {
   if (!d || typeof d !== "object" || d.connected !== true) return false;
@@ -496,15 +786,24 @@ async function loadMiningSection() {
       available && Number.isFinite(difficulty) && difficulty > 0 ? formatDifficulty(difficulty) : "n/a";
     const errors = available ? formatNumber(d.pool_errors || 0) : "0";
     const hashParts = formatHashRateParts(hrHs);
-
-    host.innerHTML = metricKvHtml([
+    const rows = [
       ["Hash rate", hashParts.value + (hashParts.unit ? " " + hashParts.unit : "")],
       ["Accepted", formatNumber(accepted)],
       ["Temperature", temp],
       ["Uptime", uptime],
       ["Difficulty", diffStr],
       ["Errors", errors],
-    ]);
+    ];
+
+    // Patch in place when the mining KV list already exists (avoids flash each poll).
+    if (host.querySelector("dl.metric-kv-compact")) {
+      let ok = true;
+      rows.forEach(function (row) {
+        if (!patchMetricKv(host, row[0], row[1])) ok = false;
+      });
+      if (ok) return;
+    }
+    host.innerHTML = metricKvHtml(rows);
   }
 
   try {
@@ -544,11 +843,16 @@ async function loadMetrics() {
       return;
     }
 
+    if (patchPortalLiveMetrics(d, status, beforeEl, upperDetailEl)) {
+      portalMetricsEverRendered = true;
+      return;
+    }
+
     const nodeVer = (d.node_version || d.nodeVersion || "").trim();
     const statusText = nodeVer
       ? "Connected to BIP-110 compliant node " + (nodeVer.startsWith("v") ? nodeVer : "v" + nodeVer)
       : "Connected to BIP-110 compliant node";
-    status.innerHTML = '<span class="status-badge status-connected">' + statusText + "</span>";
+    setPortalStatusBadge(status, "connected", statusText);
 
     const blocksUntilRetarget = d.blocks_until_retarget ?? 2016;
     const progressPct = ((2016 - blocksUntilRetarget) / 2016 * 100).toFixed(1);
@@ -581,18 +885,7 @@ async function loadMetrics() {
     const mempoolSize =
       mempoolParts.value + (mempoolParts.unit ? " " + mempoolParts.unit : "");
 
-    const recentBlockRows = (d.recent_blocks || []).slice().sort((a, b) => (b.height || 0) - (a.height || 0)).slice(0, 4).map(b => `
-      <div class="portal-mini-block">
-        <div class="portal-mini-block-head">
-          <span class="portal-mini-block-height">#${formatNumber(b.height || 0)}</span>
-          <span class="portal-mini-block-time">${formatTimeAgo(b.timestamp || 0)}</span>
-        </div>
-        <div class="portal-mini-block-stats">
-          <span>${formatNumber(b.tx_count || 0)} tx</span>
-          <span>${formatBytes(b.size || 0)}</span>
-        </div>
-      </div>
-    `).join("");
+    const recentBlockRows = recentBlocksHtml(d.recent_blocks);
 
     const compactSecondaryHtml = metricBoard(
       "",
@@ -630,7 +923,7 @@ async function loadMetrics() {
         metricClusterHtml(
           "Recent blocks",
           '<div class="portal-mini-blocks portal-mini-blocks--row">' +
-            (recentBlockRows || '<div class="portal-compact-note">No recent block data.</div>') +
+            recentBlockRows +
             "</div>"
         ),
       "metric-board--dense metric-board--details"
@@ -647,16 +940,15 @@ async function loadMetrics() {
     if (upperDetailEl) upperDetailEl.innerHTML = upperDetailHtml;
 
     portalMetricsEverRendered = true;
+    portalMetricsRenderMode = "live";
 
     if (d.blocks > lastBlockHeight && lastBlockHeight > 0) {
-      setTimeout(() => {
-        const firstBlock = document.querySelector(".portal-mini-block");
-        if (firstBlock) {
-          const themeClass = "new-block-orange";
-          firstBlock.classList.add(themeClass);
-          setTimeout(() => firstBlock.classList.remove(themeClass), 1200);
-        }
-      }, 100);
+      const firstBlock = document.querySelector(".portal-mini-block");
+      if (firstBlock) {
+        const themeClass = "new-block-orange";
+        firstBlock.classList.add(themeClass);
+        setTimeout(() => firstBlock.classList.remove(themeClass), 1200);
+      }
     }
     lastBlockHeight = d.blocks;
   } catch (e) {
@@ -1263,13 +1555,31 @@ function initTxDetailPanel() {
     panel.classList.add("expanded");
     panel.setAttribute("aria-hidden", "false");
     if (txidEl) txidEl.textContent = txid;
-    if (statusEl) statusEl.textContent = "Loading…";
-    if (graph) graph.innerHTML = '<p class="tx-detail-loading muted-note">Loading transaction…</p>';
+    if (statusEl) {
+      statusEl.innerHTML =
+        '<span class="portal-status-with-spinner">' +
+        '<span class="portal-inline-spinner" aria-hidden="true"></span>' +
+        "<span>Loading…</span></span>";
+    }
+    if (graph) {
+      graph.innerHTML =
+        '<div class="tx-detail-loading" role="status" aria-live="polite" aria-label="Loading transaction">' +
+        '<span class="tx-detail-loading-spinner" aria-hidden="true"></span>' +
+        '<span class="tx-detail-loading-label muted-note">Loading transaction…</span>' +
+        "</div>";
+    }
+    try {
+      panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } catch (_) {
+      panel.scrollIntoView(false);
+    }
 
     blockvaseFetch("/tx/" + encodeURIComponent(txid))
       .then((r) => r.json())
       .then((tx) => {
-        if (statusEl) statusEl.textContent = tx.confirmations > 0 ? "Confirmed" : "Unconfirmed (mempool)";
+        if (statusEl) {
+          statusEl.textContent = tx.confirmations > 0 ? "Confirmed" : "Unconfirmed (mempool)";
+        }
         swapContent(renderTxTableHtml(tx));
       })
       .catch((e) => {

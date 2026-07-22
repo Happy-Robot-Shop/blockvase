@@ -64,7 +64,7 @@
   </head>
   <body class="display-page {% if interactive %}mempool-interactive{% else %}display-kiosk{% endif %}" style="background-color: {{ critical_bg }};" data-theme="{{ theme | default('default') }}"{% if mempool_tx_limit is not none %} data-mempool-tx-limit="{{ mempool_tx_limit }}"{% endif %}>
     <div class="portal-splash-overlay" id="portalSplashOverlay" aria-hidden="true"></div>
-    {% if interactive %}<button type="button" class="mempool-fullscreen" id="mempoolFullscreen" aria-label="Fullscreen">⛶</button>{% endif %}
+    {% if interactive %}<button type="button" class="mempool-fullscreen" id="mempoolFullscreen" aria-label="Fullscreen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>{% endif %}
     <section id="sync-status-overlay" class="sync-status-overlay hidden" aria-live="polite" aria-label="Blockchain sync status">
       <div class="sync-status-inner sync-startup-board">
         <header class="sync-startup-header">

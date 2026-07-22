@@ -2216,6 +2216,55 @@ body.portal-page .tx-detail-error {
  padding: var(--portal-space-2) 0;
 }
 
+body.portal-page .tx-detail-loading {
+ display: flex;
+ flex-direction: column;
+ align-items: center;
+ justify-content: center;
+ gap: var(--portal-space-3);
+ min-height: min(28vh, 220px);
+ padding: var(--portal-space-5) var(--portal-space-3);
+ box-sizing: border-box;
+}
+
+body.portal-page .tx-detail-loading-spinner {
+ width: 48px;
+ height: 48px;
+ border: 3px solid color-mix(in srgb, var(--accent) 22%, transparent);
+ border-top-color: var(--accent);
+ border-radius: 50%;
+ animation: portal-layout-spin 0.85s linear infinite;
+ flex: 0 0 auto;
+}
+
+body.portal-page .tx-detail-loading-label {
+ margin: 0;
+ text-align: center;
+}
+
+body.portal-page .tx-detail-status .portal-status-with-spinner {
+ display: inline-flex;
+ align-items: center;
+ gap: 8px;
+}
+
+body.portal-page .tx-detail-status .portal-inline-spinner {
+ width: 12px;
+ height: 12px;
+ border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+ border-top-color: var(--accent);
+ border-radius: 50%;
+ animation: portal-layout-spin 0.85s linear infinite;
+ flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+ body.portal-page .tx-detail-loading-spinner,
+ body.portal-page .tx-detail-status .portal-inline-spinner {
+  animation-duration: 1.4s;
+ }
+}
+
 body.portal-page .tx-detail-panel:fullscreen .tx-table-cell,
 body.portal-page .tx-detail-panel:-webkit-full-screen .tx-table-cell {
  font-size: var(--portal-text-emphasis);
@@ -2741,6 +2790,24 @@ body.portal-page .btn-icon.tx-detail-fullscreen {
  padding: 16px 24px 24px;
  font-size: 13px;
  color: var(--muted);
+}
+
+.tx-detail-loading {
+ display: flex;
+ flex-direction: column;
+ align-items: center;
+ justify-content: center;
+ gap: 16px;
+ min-height: 180px;
+}
+
+.tx-detail-loading-spinner {
+ width: 48px;
+ height: 48px;
+ border: 3px solid color-mix(in srgb, var(--accent) 22%, transparent);
+ border-top-color: var(--accent);
+ border-radius: 50%;
+ animation: spin 0.85s linear infinite;
 }
 
 .tx-detail-error {
