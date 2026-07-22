@@ -107,6 +107,8 @@ class BM1366Miner:
         self.verify_solo = self.config.get('verify_solo', False)
         self.debug_bm1366 = self.config.get("debug_bm1366", False)
         self.asic_initialized = False
+        board_cfg = self.config.get(self.miner, {})
+        self.max_board_temp_c = float(board_cfg.get("max_board_temp_c", 70.0))
 
     def shutdown(self):
         # signal the threads to end
@@ -144,6 +146,20 @@ class BM1366Miner:
 
     def get_user_agent(self):
         return f"{self.get_name()}/0.1"
+
+    def _frequency_ramp_config(self):
+        board_cfg = self.config.get(self.miner, {})
+        ramp = {
+            "start_mhz": board_cfg.get("frequency_ramp_start_mhz", 56.25),
+            "step_mhz": board_cfg.get("frequency_ramp_step_mhz", 6.25),
+            "step_delay_sec": board_cfg.get("frequency_ramp_step_delay_sec", 0.1),
+        }
+        pause_temp = board_cfg.get("frequency_ramp_pause_temp_c")
+        if pause_temp is not None and self.hardware is not None:
+            ramp["pause_temp_c"] = float(pause_temp)
+            ramp["cooldown_temp_c"] = float(board_cfg.get("frequency_ramp_cooldown_temp_c", 62.0))
+            ramp["temp_reader"] = self.hardware.read_temperature_and_voltage
+        return ramp
 
     def _start_rest_api(self):
         rest_config = self.config.get("rest_api", None)
@@ -225,12 +241,38 @@ class BM1366Miner:
 
         max_retries = 5  # Maximum number of attempts
         chip_counter = 0
+        board_cfg = self.config.get(self.miner, {})
+        init_max_temp = board_cfg.get("asic_init_max_temp_c")
+        if init_max_temp is not None and self.hardware is not None:
+            init_max_temp = float(init_max_temp)
+            while not self.stop_event.is_set():
+                try:
+                    board_t = self.hardware.read_temperature_and_voltage()["temp"][0]
+                except Exception as ex:
+                    logging.warning("Pre-init temp read failed: %s", ex)
+                    time.sleep(2.0)
+                    continue
+                if board_t is None or board_t <= init_max_temp:
+                    break
+                logging.info(
+                    "Waiting for board cooldown before ASIC init: %.1f°C > %.1f°C",
+                    board_t,
+                    init_max_temp,
+                )
+                time.sleep(3.0)
+
+        if self.hardware is not None and hasattr(self.hardware, "enable_asic_power"):
+            self.hardware.enable_asic_power()
+            time.sleep(float(board_cfg.get("asic_power_settle_sec", 3.0)))
 
         # currently the qaxe+ needs this loop :see-no-evil:
         for attempt in range(max_retries):
             try:
                 chip_counter = self.asics.init(
-                    self.hardware.get_asic_frequency(), self.hardware.get_chip_count(), chips_enabled
+                    self.hardware.get_asic_frequency(),
+                    self.hardware.get_chip_count(),
+                    chips_enabled,
+                    self._frequency_ramp_config(),
                 )
                 print("Initialization successful.")
                 self.asic_initialized = True
@@ -240,7 +282,20 @@ class BM1366Miner:
 
                 # only retry on 1368s
                 if not isinstance(self.asics, bm1366.BM1368):
+                    if (
+                        attempt < max_retries - 1
+                        and self.miner == "piaxe"
+                        and self.hardware is not None
+                    ):
+                        logging.info("Retrying ASIC init after power cycle...")
+                        self.hardware.shutdown()
+                        time.sleep(float(board_cfg.get("asic_power_retry_sec", 8.0)))
+                        self.hardware.enable_asic_power()
+                        time.sleep(float(board_cfg.get("asic_power_settle_sec", 3.0)))
+                        continue
                     logging.error("ASIC init failed; LM75/REST monitoring continues without hashing.")
+                    if self.miner == "piaxe" and self.hardware is not None:
+                        self.hardware.shutdown()
                     break
 
                 if attempt < max_retries - 1:
@@ -417,8 +472,12 @@ class BM1366Miner:
 
 
             for i in range(0, 4):
-                if temp["temp"][i] is not None and temp["temp"][i] > 70.0:
-                    logging.error("too hot, shutting down ...")
+                if temp["temp"][i] is not None and temp["temp"][i] > self.max_board_temp_c:
+                    logging.error(
+                        "too hot (%.1f°C > %.1f°C), shutting down ...",
+                        temp["temp"][i],
+                        self.max_board_temp_c,
+                    )
                     self.hardware.shutdown()
                     os._exit(1)
 

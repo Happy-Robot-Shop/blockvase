@@ -1,5 +1,5 @@
 [Unit]
-Description=Periodically check Blockvase home Wi-Fi (recover to setup AP if offline)
+Description=Periodically check Blockvase home Wi-Fi (retry saved network; soft-recover to setup AP if still offline)
 After=NetworkManager.service
 
 [Timer]

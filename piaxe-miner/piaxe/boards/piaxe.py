@@ -93,15 +93,16 @@ class RPiHardware(board.Board):
             timeout=1                      # Set a read timeout
         )
 
+    def enable_asic_power(self):
         GPIO.output(self.sdn_pin, True)
-
         while (not self._is_power_good()):
-            print("power not good ... waiting ...")
+            logging.info("power not good ... waiting ...")
             time.sleep(1)
 
     def _is_power_good(self):
-        # Active-low PGOOD: LOW = rail OK, HIGH = not ready (pin has pull-up).
-        return not GPIO.input(self.pgood_pin)
+        # SiC431 open-drain PG with pull-up to 3V3: HIGH = in regulation.
+        # (Do not invert — LED1 on the PGOOD net lights when power is NOT good.)
+        return GPIO.input(self.pgood_pin)
 
     def set_fan_speed(self, channel, speed):
         pass
@@ -125,10 +126,13 @@ class RPiHardware(board.Board):
         GPIO.output(self.led_pin, True if state else False)
 
     def reset_func(self):
-        # BM1366 NRSTI is active-low: pulse low, then release high for normal operation.
-        GPIO.output(self.nrst_pin, False)
-        time.sleep(0.5)
+        # BM1366 NRSTI is active-low at the chip, but the HAT routes Pi pin 15
+        # (RST) through Q1 (BSS138 common-source inverter) to RST_N. Same as
+        # upstream PiAxe Q5. GPIO HIGH → chip held in reset; GPIO LOW → runs.
+        # Pulse high to assert, then rest low so the ASIC can respond on UART.
         GPIO.output(self.nrst_pin, True)
+        time.sleep(0.5)
+        GPIO.output(self.nrst_pin, False)
         time.sleep(0.5)
 
 

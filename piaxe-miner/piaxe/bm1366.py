@@ -148,17 +148,56 @@ class ClockManager:
         else:
             return self.clocks[id]
 
-    def do_frequency_ramp_up(self, frequency):
-        start = current = 56.25
-        step = 6.25
-        target= frequency
+    def _wait_for_board_cooldown(self, ramp_config):
+        temp_reader = ramp_config.get("temp_reader")
+        pause_temp = ramp_config.get("pause_temp_c")
+        cooldown_temp = ramp_config.get("cooldown_temp_c", 62.0)
+        if temp_reader is None or pause_temp is None:
+            return
+
+        while True:
+            try:
+                reading = temp_reader()
+            except Exception as ex:
+                logging.warning("Frequency ramp temp read failed: %s", ex)
+                time.sleep(1.0)
+                continue
+
+            board_t = reading["temp"][0]
+            if board_t is None or board_t <= pause_temp:
+                return
+
+            logging.info(
+                "Frequency ramp paused: board temp %.1f°C > %.1f°C (cooldown target %.1f°C)",
+                board_t,
+                pause_temp,
+                cooldown_temp,
+            )
+            time.sleep(2.0)
+            try:
+                reading = temp_reader()
+                board_t = reading["temp"][0]
+            except Exception:
+                continue
+            if board_t is not None and board_t <= cooldown_temp:
+                logging.info("Frequency ramp resuming: board temp %.1f°C", board_t)
+                return
+
+    def do_frequency_ramp_up(self, frequency, ramp_config=None):
+        ramp_config = ramp_config or {}
+        start = float(ramp_config.get("start_mhz", 56.25))
+        step = float(ramp_config.get("step_mhz", 6.25))
+        delay = float(ramp_config.get("step_delay_sec", 0.1))
+        current = start
 
         self.set_clock(-1, start)
-        while current < target:
-            next_step = min(step, target-current)
+        self._wait_for_board_cooldown(ramp_config)
+        while current < frequency:
+            self._wait_for_board_cooldown(ramp_config)
+            next_step = min(step, frequency - current)
             current += next_step
             self.set_clock(-1, current)
-            time.sleep(0.100)
+            time.sleep(delay)
 
 class BM1366:
     def __init__(self):
@@ -279,7 +318,7 @@ class BM1366:
         return chip_counter
 
 
-    def send_init(self, frequency, expected, chips_enabled = None):
+    def send_init(self, frequency, expected, chips_enabled=None, ramp_config=None):
         self.send(TYPE_CMD | GROUP_ALL | CMD_WRITE, [0x00, 0xA4, 0x90, 0x00, 0xFF, 0xFF])
         self.send(TYPE_CMD | GROUP_ALL | CMD_WRITE, [0x00, 0xA4, 0x90, 0x00, 0xFF, 0xFF])
         self.send(TYPE_CMD | GROUP_ALL | CMD_WRITE, [0x00, 0xA4, 0x90, 0x00, 0xFF, 0xFF])
@@ -318,7 +357,7 @@ class BM1366:
             time.sleep(0.500)
 
         self.clock_manager = ClockManager(self, frequency, chip_counter)
-        self.clock_manager.do_frequency_ramp_up(frequency)
+        self.clock_manager.do_frequency_ramp_up(frequency, ramp_config)
 
         self.send(TYPE_CMD | GROUP_ALL | CMD_WRITE, [0x00, 0x10, 0x00, 0x00, 0x15, 0x1c])
         self.send(TYPE_CMD | GROUP_ALL | CMD_WRITE, [0x00, 0xA4, 0x90, 0x00, 0xFF, 0xFF])
@@ -336,12 +375,13 @@ class BM1366:
     def reset(self):
         self.reset_func()
 
-    def init(self, frequency, expected, chips_enabled = None):
+    def init(self, frequency, expected, chips_enabled=None, ramp_config=None):
         logging.info("Initializing BM1366")
 
         self.reset()
+        time.sleep(2.0)
 
-        return self.send_init(frequency, expected, chips_enabled)
+        return self.send_init(frequency, expected, chips_enabled, ramp_config)
 
     # Baud formula = 25M/((denominator+1)*8)
     # The denominator is 5 bits found in the misc_control (bits 9-13)
@@ -458,7 +498,7 @@ class BM1368(BM1366):
             if data is None:
                 return
 
-    def send_init(self, frequency, expected, chips_enabled = None):
+    def send_init(self, frequency, expected, chips_enabled=None, ramp_config=None):
         self.clear_serial_buffer()
 
         # enable and set version rolling mask to 0xFFFF
@@ -513,7 +553,7 @@ class BM1368(BM1366):
             time.sleep(0.500)
 
         self.clock_manager = ClockManager(self, frequency, chip_counter)
-        self.clock_manager.do_frequency_ramp_up(frequency)
+        self.clock_manager.do_frequency_ramp_up(frequency, ramp_config)
 
         # change baud
         #self.send(TYPE_CMD | GROUP_ALL | CMD_WRITE, [0x00, 0x28, 0x11, 0x30, 0x02, 0x00])

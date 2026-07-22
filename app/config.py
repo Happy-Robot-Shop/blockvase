@@ -21,6 +21,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "wifi_ssid": "",
     "wifi_password": "",
     "setup_complete": False,
+    # Soft offline recovery: show setup QR/hotspot while keeping setup_complete + Wi-Fi secrets
+    # so the device can keep retrying the saved network and leave setup when it reconnects.
+    "wifi_recovery": False,
     "setup_token": "",
     "admin_username": "",
     "admin_password_hash": "",

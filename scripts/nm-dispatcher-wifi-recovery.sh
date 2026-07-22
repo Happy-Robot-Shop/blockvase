@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# NetworkManager dispatcher: recover to setup AP + QR when wlan drops after setup.
+# NetworkManager dispatcher: retry saved Wi-Fi, then soft-recover (setup AP + QR)
+# while keeping credentials and continuing reconnect attempts.
 # Installed to /etc/NetworkManager/dispatcher.d/99-blockvase-wifi by bootstrap.
 set -euo pipefail
 

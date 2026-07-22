@@ -907,7 +907,9 @@ async function pollSetupState() {
     return;
   }
 
-  if (!status.setup_complete) {
+  // show_setup covers first-boot and soft Wi-Fi recovery (saved network still retried).
+  const showSetup = status.show_setup === true || status.setup_complete === false;
+  if (showSetup) {
     if (isDisplayKiosk()) {
       revealKioskBootScreen(true, false, false);
     } else {

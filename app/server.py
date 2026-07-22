@@ -162,6 +162,15 @@ def _is_setup_complete(cfg: dict[str, Any]) -> bool:
     return bool(cfg.get("setup_complete"))
 
 
+def _is_wifi_recovery(cfg: dict[str, Any]) -> bool:
+    return bool(cfg.get("wifi_recovery"))
+
+
+def _needs_setup_ui(cfg: dict[str, Any]) -> bool:
+    """True for first-boot setup or soft Wi-Fi recovery (show QR / hotspot UI)."""
+    return (not _is_setup_complete(cfg)) or _is_wifi_recovery(cfg)
+
+
 def _parse_iso_utc(value: Any) -> float | None:
     text = str(value or "").strip()
     if not text:
@@ -436,7 +445,7 @@ def _detect_ip() -> str:
 
 
 def _setup_url(cfg: dict[str, Any]) -> str:
-    host = "192.168.4.1" if not _is_setup_complete(cfg) else _detect_ip()
+    host = "192.168.4.1" if _needs_setup_ui(cfg) else _detect_ip()
     port = os.getenv("BLOCKVASE_PORT", "80")
     return f"http://{host}:{port}/setup?token={cfg.get('setup_token', '')}"
 
@@ -493,7 +502,7 @@ def _theme():
 @app.get("/")
 def index():
     cfg = load_config()
-    if not _is_setup_complete(cfg):
+    if _needs_setup_ui(cfg):
         return redirect(url_for("display"))
     return render_template("index.html", theme=_theme())
 
@@ -501,7 +510,7 @@ def index():
 @app.get("/settings")
 def settings():
     cfg = load_config()
-    if not _is_setup_complete(cfg):
+    if _needs_setup_ui(cfg):
         return redirect(url_for("setup_page", token=cfg.get("setup_token", "")))
     response = make_response(render_template("settings.html", theme=_theme()))
     if _is_token_valid(cfg, _request_admin_token()):
@@ -875,6 +884,7 @@ def save_all():
         # Setup complete = saved home Wi-Fi SSID; Bitcoin node is local (no RPC fields in UI).
         if home_wifi:
             cfg["setup_complete"] = True
+            cfg["wifi_recovery"] = False
 
         save_config(cfg)
         _sync_hostname(cfg["device_name"])
@@ -892,7 +902,7 @@ def save_all():
                     try:
                         result = subprocess.run(
                             ["sudo", str(ap_script), "ensure"],
-                            timeout=120,
+                            timeout=180,
                             capture_output=True,
                             text=True,
                             encoding="utf-8",
@@ -909,15 +919,20 @@ def save_all():
                     except (subprocess.TimeoutExpired, OSError) as ex:
                         _log.exception("ap-mode ensure: %s", ex)
                 if not ok:
-                    # Stay in setup/AP mode so the device is not stranded offline.
+                    # Soft recovery: keep credentials, show setup QR, do not reboot.
                     try:
                         cfg_retry = load_config()
-                        cfg_retry["setup_complete"] = False
+                        if (cfg_retry.get("wifi_ssid") or "").strip():
+                            cfg_retry["wifi_recovery"] = True
+                            # Keep setup_complete so reconnect / later save can leave recovery.
+                        else:
+                            cfg_retry["setup_complete"] = False
+                            cfg_retry["wifi_recovery"] = False
                         save_config(cfg_retry)
                         if ap_script.exists():
                             subprocess.run(
                                 ["sudo", str(ap_script), "ensure"],
-                                timeout=120,
+                                timeout=180,
                                 capture_output=True,
                                 text=True,
                                 encoding="utf-8",
@@ -925,7 +940,7 @@ def save_all():
                                 check=False,
                             )
                     except (OSError, subprocess.SubprocessError) as ex:
-                        _log.exception("failed to revert to AP after wifi error: %s", ex)
+                        _log.exception("failed to enter soft recovery after wifi error: %s", ex)
                     return
                 if os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() != "true":
                     _log.info("reboot after wifi switch skipped: ENABLE_SYSTEM_ACTIONS is not true")
@@ -1091,7 +1106,11 @@ def stats():
             "uptime": f"{int(time.monotonic() // 60)} min",
             "freeHeap": _get_free_memory(),
             "largestBlock": largest_block,
-            "wifiStatus": "AP setup mode" if not _is_setup_complete(cfg) else "Wi-Fi client mode",
+            "wifiStatus": (
+                "Wi-Fi recovery (setup AP)"
+                if _is_wifi_recovery(cfg)
+                else ("AP setup mode" if not _is_setup_complete(cfg) else "Wi-Fi client mode")
+            ),
             "ipAddress": ip_or_host,
             "bitcoinNode": "Connected" if m.get("connected") else "Disconnected",
             "nodeVersion": (m.get("node_version") or "").strip(),
@@ -1257,7 +1276,13 @@ def device_update_start():
 @app.get("/api/ap-mode")
 def ap_mode():
     cfg = load_config()
-    return jsonify({"ap_mode": not _is_setup_complete(cfg)})
+    return jsonify(
+        {
+            "ap_mode": _needs_setup_ui(cfg),
+            "wifi_recovery": _is_wifi_recovery(cfg),
+            "setup_complete": _is_setup_complete(cfg),
+        }
+    )
 
 
 @app.get("/api/validate-qr-token")
@@ -1271,13 +1296,18 @@ def validate_qr():
 def setup_status():
     cfg = load_config()
     setup_complete = _is_setup_complete(cfg)
+    wifi_recovery = _is_wifi_recovery(cfg)
+    show_setup = _needs_setup_ui(cfg)
     update = _read_update_status()
     return jsonify(
         {
-            "setup_complete": setup_complete,
-            "setup_url": "" if setup_complete else _setup_url(cfg),
+            "setup_complete": setup_complete and not wifi_recovery,
+            "configured": setup_complete,
+            "wifi_recovery": wifi_recovery,
+            "show_setup": show_setup,
+            "setup_url": _setup_url(cfg) if show_setup else "",
             "device_name": cfg.get("device_name", "blockvase"),
-            "ap_mode": not setup_complete,
+            "ap_mode": show_setup,
             "update": update,
             "updating": bool(update.get("updating")),
             "update_show_overlay": bool(update.get("show_overlay")),
@@ -1288,16 +1318,17 @@ def setup_status():
 @app.get("/api/ap-info")
 def ap_info():
     cfg = load_config()
-    setup_complete = _is_setup_complete(cfg)
+    show_setup = _needs_setup_ui(cfg)
     ap_ssid = ap_broadcast_ssid(cfg)
     ap_password = "blockvase1234"
     wifi_qr_payload = f"WIFI:T:WPA;S:{ap_ssid};P:{ap_password};;"
     return jsonify(
         {
-            "ap_mode": not setup_complete,
+            "ap_mode": show_setup,
+            "wifi_recovery": _is_wifi_recovery(cfg),
             "ssid": ap_ssid,
             "password": ap_password,
-            "settings_url": "" if setup_complete else _setup_url(cfg),
+            "settings_url": _setup_url(cfg) if show_setup else "",
             "wifi_qr_payload": wifi_qr_payload,
             "ap_clients": _ap_client_count(),
         }
@@ -1307,7 +1338,8 @@ def ap_info():
 @app.get("/api/setup-qr.svg")
 def setup_qr():
     cfg = load_config()
-    if _is_setup_complete(cfg) and not _is_token_valid(cfg, _request_admin_token()):
+    # Allow QR during soft Wi-Fi recovery even though setup_complete stays true.
+    if not _needs_setup_ui(cfg) and not _is_token_valid(cfg, _request_admin_token()):
         return "Setup QR unavailable after setup.", 403
     kind = request.args.get("kind", "settings")
     if kind == "connect":

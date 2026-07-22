@@ -370,6 +370,7 @@ cfg = {}
 if path.exists():
     cfg = json.loads(path.read_text(encoding="utf-8"))
 cfg["setup_complete"] = False
+cfg["wifi_recovery"] = False
 cfg["wifi_ssid"] = ""
 cfg["wifi_password"] = ""
 cfg["setup_token"] = secrets.token_urlsafe(16)

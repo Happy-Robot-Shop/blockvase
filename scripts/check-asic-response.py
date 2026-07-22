@@ -245,7 +245,12 @@ def main() -> None:
     parser.add_argument(
         "--reset-active-low",
         action="store_true",
-        help="Use alternate reset pulse (low then high) for boards where nRST is active-low.",
+        help=(
+            "Alternate reset pulse that rests HIGH (low then high). Only for boards "
+            "with NRSTI wired directly to the Pi GPIO. Do NOT use on PiAxe/Blockvase "
+            "HATs: those invert RST through a BSS138 (Q1/Q5), so rest-HIGH holds the "
+            "chip in permanent reset."
+        ),
     )
     parser.add_argument(
         "--dump-responses",
@@ -307,6 +312,7 @@ def main() -> None:
 
     try:
         hardware = piaxe_mod.RPiHardware(p_cfg)
+        hardware.enable_asic_power()
 
         # Useful board-state breadcrumb before any BM1366 traffic.
         try:
@@ -332,7 +338,11 @@ def main() -> None:
                     time.sleep(0.50)
 
                 reset_fn = _reset_active_low
-                print("Using alternate reset pulse: nRST low -> high", flush=True)
+                print(
+                    "Using alternate reset pulse: nRST low -> rest HIGH "
+                    "(wrong for PiAxe/Blockvase inverter HATs)",
+                    flush=True,
+                )
             except Exception as ex:
                 logging.warning("Could not enable alternate reset pulse: %s", ex)
 

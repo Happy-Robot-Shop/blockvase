@@ -101,7 +101,7 @@ class SimulatedASICs:
     def send_hash_frequency2(self, *_args, **_kwargs) -> None:
         """REST clock API → ClockManager; no-op."""
 
-    def init(self, frequency: float, chips_expected: int, chips_enabled=None):  # noqa: ARG002
+    def init(self, frequency: float, chips_expected: int, chips_enabled=None, ramp_config=None):  # noqa: ARG002
         n = int(chips_expected) if chips_expected else 1
         self.clock_manager = SimClockManager(self, frequency, n)
         logging.info(

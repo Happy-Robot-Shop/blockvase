@@ -11,13 +11,22 @@ suggest_difficulty: 2048
 piaxe:
   name: PiAxe
   chips: 1
-  asic_frequency: 485
+  # Participation mode: stay online at low clock; hashrate is secondary.
+  asic_frequency: 62.5
+  max_board_temp_c: 95
+  asic_init_max_temp_c: 72
+  asic_power_settle_sec: 5
+  asic_power_retry_sec: 15
+  frequency_ramp_start_mhz: 56.25
+  frequency_ramp_step_delay_sec: 2.5
+  frequency_ramp_pause_temp_c: 82
+  frequency_ramp_cooldown_temp_c: 74
   sdn_pin: 11
   pgood_pin: 13
   nrst_pin: 15
   led_pin: 19
   pwm_hz: 1000
-  pwm_duty_cycle: 80
+  pwm_duty_cycle: 100
   lm75_address: 0x48
   extranonce2_interval: 1.5
   serial_port: "/dev/serial0"

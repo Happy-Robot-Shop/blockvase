@@ -1,5 +1,5 @@
 [Unit]
-Description=Blockvase Wi-Fi online check (recover to setup AP if offline)
+Description=Blockvase Wi-Fi online check (retry saved network; soft-recover if still offline)
 After=NetworkManager.service blockvase-ap.service
 Wants=NetworkManager.service
 

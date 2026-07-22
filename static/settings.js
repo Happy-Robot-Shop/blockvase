@@ -380,7 +380,10 @@ function loadRpc(retryCount = 0) {
     })
     .then(r => r.json())
     .then(w => {
-      if (!window.isApMode && w.ssid) document.getElementById("ssid").value = w.ssid || "";
+      if (w.ssid) {
+        const ssidEl = document.getElementById(window.isApMode ? "setupSsid" : "ssid");
+        if (ssidEl && !ssidEl.value) ssidEl.value = w.ssid;
+      }
       return fetch(withToken("/api/device-name"));
     })
     .then(r => r.json())
