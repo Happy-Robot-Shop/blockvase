@@ -28,7 +28,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "admin_username": "",
     "admin_password_hash": "",
     "mining_payout_address": "",
-    "mining_simulation_enabled": False,
     "rpc": {
         "host": "127.0.0.1",
         "port": 8332,

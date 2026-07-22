@@ -1,8 +1,4 @@
-"""Portal mining metrics read from PiAxe-miner REST (`GET /influx/stats`).
-
-Settings → mining simulation points the miner at `config.blockvase.simulate.yml` (CPU
-nonce search); this module always proxies live REST, there is no portal-side fake miner.
-"""
+"""Portal mining metrics read from PiAxe-miner REST (`GET /influx/stats`)."""
 
 from __future__ import annotations
 

@@ -729,96 +729,6 @@ def set_mining_payout():
     return _json_ok(address=address, message="Mining payout address saved.", applied=True)
 
 
-@app.get("/api/mining-simulation")
-def get_mining_simulation():
-    cfg = load_config()
-    token_err = _require_admin_token(cfg)
-    if token_err:
-        return token_err
-    return jsonify({"mining_simulation_enabled": bool(cfg.get("mining_simulation_enabled"))})
-
-
-@app.post("/api/mining-simulation")
-def set_mining_simulation():
-    body = request.get_json(force=True, silent=True) or {}
-    cfg = load_config()
-    token_err = _require_admin_token(cfg, body)
-    if token_err:
-        return token_err
-
-    enabled = body.get("mining_simulation_enabled")
-    if isinstance(enabled, str):
-        enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
-    if not isinstance(enabled, bool):
-        return _json_err("mining_simulation_enabled must be true or false", 400)
-
-    cfg["mining_simulation_enabled"] = enabled
-    try:
-        save_config(cfg)
-    except PermissionError:
-        _log.exception("mining-simulation: cannot write %s", CONFIG_PATH)
-        return _json_err(
-            "Cannot save (config not writable). Run: sudo chown blockvase:blockvase " + str(CONFIG_PATH),
-            500,
-        )
-    except OSError as ex:
-        _log.exception("mining-simulation: save failed")
-        return _json_err("Could not save mining simulation setting: %s" % ex, 500)
-
-    refresh_script = BASE_DIR / "scripts/blockvase-miner-refresh-env.sh"
-    miner_refreshed = False
-    refresh_error = ""
-    actions_on = os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() == "true"
-    if actions_on and refresh_script.is_file():
-        try:
-            result = subprocess.run(
-                ["sudo", "-n", str(refresh_script), "--restart-miner"],
-                timeout=120,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
-            miner_refreshed = result.returncode == 0
-            if result.returncode != 0:
-                refresh_error = (result.stderr or result.stdout or "").strip()
-                _log.warning(
-                    "blockvase-miner-refresh-env failed rc=%s stderr=%s",
-                    result.returncode,
-                    refresh_error[:400],
-                )
-        except (OSError, subprocess.SubprocessError) as ex:
-            refresh_error = str(ex)
-            _log.warning("Could not refresh miner env: %s", ex)
-
-    msg = "Mining simulation setting saved."
-    if enabled and not (cfg.get("mining_payout_address") or "").strip():
-        msg += " Save a Bitcoin payout address too; hashing starts once a payout is configured."
-    if actions_on:
-        if miner_refreshed:
-            msg += " blockvase-miner.service was restarted with simulate or production YAML."
-        elif not refresh_script.is_file():
-            msg += " (blockvase-miner-refresh-env.sh not found, miner env was not updated)."
-        elif "password" in refresh_error.lower() or "sudo" in refresh_error.lower():
-            msg += (
-                " passwordless sudo is not installed for the miner refresh helper. "
-                "Re-run scripts/bootstrap.sh or install /etc/sudoers.d/blockvase-miner-env, then save again."
-            )
-        else:
-            detail = (" " + refresh_error[:180]) if refresh_error else ""
-            msg += " systemd refresh failed: check journalctl and run the refresh script manually." + detail
-    else:
-        msg += " ENABLE_SYSTEM_ACTIONS is not true, restart blockvase-miner manually to apply miner.yml."
-
-    return _json_ok(
-        mining_simulation_enabled=enabled,
-        miner_service_reconfigured=miner_refreshed,
-        refresh_error=refresh_error,
-        message=msg,
-    )
-
-
 @app.get("/api/display-offset")
 def get_display_offset():
     cfg = load_config()
@@ -983,10 +893,9 @@ def blockchain_info():
 
 @app.get("/api/mining")
 def mining_stats():
-    """PiAxe-miner REST metrics (graceful zeros if unreachable). Dashboard adds hardware_simulated from Settings."""
+    """PiAxe-miner REST metrics (graceful zeros if unreachable)."""
     cfg = load_config()
     data = fetch_mining_metrics()
-    data["hardware_simulated"] = bool(cfg.get("mining_simulation_enabled"))
     data["payout_configured"] = bool(_current_mining_payout_address(cfg).strip())
     return jsonify(data)
 
@@ -1170,7 +1079,6 @@ def factory_reset():
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))
     cfg["setup_token"] = ""
     cfg["mining_payout_address"] = ""
-    cfg["mining_simulation_enabled"] = False
     cfg["rpc"] = json.loads(json.dumps(DEFAULT_CONFIG["rpc"]))
     cfg["rpc"].update(preserved_rpc)
     _apply_local_rpc(cfg)

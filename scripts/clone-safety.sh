@@ -377,14 +377,14 @@ cfg["setup_token"] = secrets.token_urlsafe(16)
 cfg["admin_username"] = ""
 cfg["admin_password_hash"] = ""
 cfg["mining_payout_address"] = ""
-cfg["mining_simulation_enabled"] = False
+cfg.pop("mining_simulation_enabled", None)
 cfg.setdefault("device_name", "blockvase")
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 print("setup_complete=false")
 print("wifi credentials cleared")
 print("admin credentials cleared")
-print("mining payout/simulation cleared")
+print("mining payout cleared")
 print("setup_token regenerated")
 PY
   local owner="blockvase"

@@ -166,7 +166,7 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 
 - **Hardware:** Blockvase ships a modified PiAxe HAT. Design files and schematics live under `hardware/piaxe/`. The main change versus the original OSMU PiAxe is **single USB-C power** for the entire stack (Raspberry Pi + miner HAT), instead of the stock PiAxe power arrangement.
 - **Software:** Vendored under `piaxe-miner/`, launched by `scripts/blockvase-miner-run.sh` / `systemd/blockvase-miner.service`.
-- Default configs: `piaxe-miner/config.blockvase.yml` and `config.blockvase.simulate.yml`.
+- Default config: `piaxe-miner/config.blockvase.yml`.
 - Connects to **local DATUM only** (`stratum+tcp://127.0.0.1:23334`) when a payout address is set. It never connects to an external Stratum pool URL.
 
 **Blockvase modifications**
@@ -175,8 +175,8 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 - **Graceful hardware failure:** board/GPIO/I2C init failures no longer kill the process; REST stays up when possible (`piaxe/miner.py`).
 - **Graceful ASIC failure:** chip enumeration failure keeps LM75/REST monitoring without hashing (extended soft-fail path).
 - **Monitoring without payout:** miner service can run with an empty Stratum user; no hashing until Settings saves a payout (`pyminer.py`, `blockvase-miner-run.sh`).
-- **Blockvase configs:** production and CPU-simulation YAML, REST on localhost for portal mining metrics.
-- **Lifecycle:** systemd + env file (`/etc/blockvase/miner.env`) instead of ad-hoc shell start; simulation toggle via Settings.
+- **Blockvase config:** production YAML with REST on localhost for portal mining metrics.
+- **Lifecycle:** systemd + env file (`/etc/blockvase/miner.env`) instead of ad-hoc shell start.
 - **Service coupling:** miner unit does not hard-require DATUM, so monitoring works when DATUM is off.
 
 Upstream piaxe-miner already documents its own changes versus original PyMiner (Python 3, PiAxe/QAxe, reconnect). Blockvase builds on that fork for software and on the OSMU PiAxe HAT for hardware.

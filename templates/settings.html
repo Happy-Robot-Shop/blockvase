@@ -172,23 +172,6 @@
           </form>
         </div>
 
-        <div class="metric-cluster-divider" aria-hidden="true"></div>
-
-        <div class="metric-cluster mining-simulation-panel">
-          <h4 class="metric-cluster-title">Mining simulation</h4>
-          <label class="settings-checkbox-label">
-            <input id="miningSimulationToggle" type="checkbox" autocomplete="off" />
-            <span class="muted-note muted-note--compact muted-note--block">
-              Enables <code>piaxe-miner</code> with <code>config.blockvase.simulate.yml</code>: real Stratum to the local DATUM Gateway and Knots GBT pipeline, while nonces are searched on the CPU instead of BM1366 hardware.
-              Turn off for a normal PiAxe. The miner runs for board monitoring by default; hashing needs a saved payout address and <code>ENABLE_SYSTEM_ACTIONS=true</code>.
-            </span>
-          </label>
-          <p id="miningSimulationEnvNote" class="muted-note muted-note--compact btn-spaced" style="display:none;"></p>
-          <button type="button" class="btn secondary btn-spaced-lg" id="saveMiningSimulationBtn">
-            Save simulation setting
-          </button>
-          <div id="miningSimulationStatus" class="status info" style="display:none;"></div>
-        </div>
       </div>
 
       </div><!-- .settings-config-main -->

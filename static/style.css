@@ -124,9 +124,9 @@ body.portal-page .btn {
 }
 
 body.portal-page .btn:not(.secondary):not(.danger):not(.btn-flat) {
- background: var(--accent);
- color: #ffffff;
- box-shadow: 0 2px 8px rgba(247, 147, 26, 0.28);
+ background: #ffffff;
+ color: #0a0a0a;
+ box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
  font-weight: 600;
 }
 
@@ -139,7 +139,9 @@ body.portal-page .btn:not(.secondary):not(.danger):not(.btn-flat):hover {
 }
 
 body.portal-page .btn:not(.secondary):not(.danger):not(.btn-flat):hover {
- box-shadow: 0 4px 14px rgba(247, 147, 26, 0.38);
+ background: #ffffff;
+ color: #0a0a0a;
+ box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 
 body.portal-page .btn.secondary,
@@ -267,11 +269,15 @@ body[data-theme="ocean"].portal-page select:focus {
 }
 
 body[data-theme="ocean"].portal-page .btn:not(.secondary):not(.danger):not(.btn-flat) {
- box-shadow: 0 2px 8px rgba(34, 211, 238, 0.35);
+ background: #ffffff;
+ color: #0a0a0a;
+ box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
 }
 
 body[data-theme="ocean"].portal-page .btn:not(.secondary):not(.danger):not(.btn-flat):hover {
- box-shadow: 0 4px 14px rgba(34, 211, 238, 0.48);
+ background: #ffffff;
+ color: #0a0a0a;
+ box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 
 body[data-theme="ocean"].portal-page .progress-bar-fill {
@@ -2306,15 +2312,6 @@ body.portal-page.settings-page .settings-kv-highlight {
  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-body.portal-page.settings-page .mining-simulation-panel {
- margin: 0;
- padding: 0;
- background: none;
- border: none;
- box-shadow: none;
- border-radius: 0;
-}
-
 body.portal-page.settings-page .system-groups {
  gap: 0;
 }
@@ -3130,13 +3127,13 @@ body.settings-page .form-row + .btn {
  margin-top: 16px;
  border: none;
  border-radius: var(--portal-radius-md);
- background: var(--accent);
- color: #ffffff;
+ background: #ffffff;
+ color: #0a0a0a;
  font-weight: 600;
  cursor: pointer;
  transition: all 0.2s ease;
  box-sizing: border-box;
- box-shadow: 0 2px 4px rgba(0, 183, 255, 0.2);
+ box-shadow: 0 2px 4px rgba(0, 0, 0, 0.22);
  text-decoration: none;
  display: inline-block;
  text-align: center;
@@ -3150,7 +3147,9 @@ form .btn:first-of-type {
 .btn:hover {
  opacity: 0.9;
  transform: translateY(-1px);
- box-shadow: 0 3px 6px rgba(0, 183, 255, 0.3);
+ background: #ffffff;
+ color: #0a0a0a;
+ box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
 }
 
 .btn.secondary,
@@ -4291,28 +4290,6 @@ body.portal-page.settings-page #wifiRpcSection #deviceNameForm .btn-network-seco
  }
 }
 
-body.settings-page .mining-simulation-panel .settings-checkbox-label {
- display: flex;
- align-items: flex-start;
- gap: var(--portal-space-2);
- cursor: pointer;
- margin: 0;
- font-weight: 400;
- color: var(--text);
-}
-
-body.settings-page .mining-simulation-panel .settings-checkbox-label input[type="checkbox"] {
- margin-top: 4px;
- align-self: flex-start;
-}
-
-body.settings-page .mining-simulation-panel .settings-checkbox-label > span:last-of-type {
- flex: 1 1 0;
- min-width: 0;
- overflow-wrap: break-word;
- word-break: break-word;
-}
-
 /* Settings page Actions card, aligned with Network field grids */
 body.settings-page .settings-section-actions {
  display: flex;
@@ -5176,30 +5153,36 @@ body.settings-page .settings-section-actions .settings-actions-buttons--stack {
  margin-top: var(--portal-space-2);
 }
 
-/* Available update: same filled accent treatment as primary portal buttons */
+/* Available update: same filled treatment as primary portal buttons */
 body.portal-page.settings-page #updateDeviceBtn.btn-update-available {
- background: var(--accent);
- color: #ffffff;
- border-color: var(--accent);
- box-shadow: 0 2px 8px rgba(247, 147, 26, 0.28);
+ background: #ffffff;
+ color: #0a0a0a;
+ border-color: #ffffff;
+ box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
  font-weight: 600;
 }
 
 body.portal-page.settings-page #updateDeviceBtn.btn-update-available:hover {
- background: var(--accent);
- color: #ffffff;
- border-color: var(--accent);
- box-shadow: 0 4px 14px rgba(247, 147, 26, 0.38);
+ background: #ffffff;
+ color: #0a0a0a;
+ border-color: #ffffff;
+ box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
  opacity: 0.94;
  transform: translateY(-1px);
 }
 
 body[data-theme="ocean"].portal-page.settings-page #updateDeviceBtn.btn-update-available {
- box-shadow: 0 2px 8px rgba(34, 211, 238, 0.35);
+ background: #ffffff;
+ color: #0a0a0a;
+ border-color: #ffffff;
+ box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
 }
 
 body[data-theme="ocean"].portal-page.settings-page #updateDeviceBtn.btn-update-available:hover {
- box-shadow: 0 4px 14px rgba(34, 211, 238, 0.48);
+ background: #ffffff;
+ color: #0a0a0a;
+ border-color: #ffffff;
+ box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 
 body.display-page {

@@ -6,7 +6,6 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADDRESS_FILE="/etc/blockvase/solo_mining_address"
 MINER_ENV="/etc/blockvase/miner.env"
-CONFIG_JSON="${PROJECT_DIR}/data/config.json"
 SERVICE_USER="${BLOCKVASE_SERVICE_USER:-${SUDO_USER:-blockvase}}"
 if [[ -z "${SERVICE_USER}" || "${SERVICE_USER}" == "root" ]]; then
   SERVICE_USER="blockvase"
@@ -25,11 +24,6 @@ if [[ -f "${ADDRESS_FILE}" ]]; then
 fi
 
 MINER_CFG="config.blockvase.yml"
-if [[ -f "${CONFIG_JSON}" ]] && command -v jq >/dev/null 2>&1; then
-  if jq -e '.mining_simulation_enabled == true' "${CONFIG_JSON}" >/dev/null 2>&1; then
-    MINER_CFG="config.blockvase.simulate.yml"
-  fi
-fi
 
 mkdir -p /etc/blockvase
 

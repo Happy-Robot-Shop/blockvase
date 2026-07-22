@@ -229,61 +229,6 @@ function loadMiningPayout() {
     .catch(() => {});
 }
 
-function loadMiningSimulation() {
-  const note = document.getElementById("miningSimulationEnvNote");
-  fetch(withToken("/api/mining-simulation"))
-    .then(r => r.json())
-    .then(d => {
-      const cb = document.getElementById("miningSimulationToggle");
-      if (cb) cb.checked = !!d.mining_simulation_enabled;
-      if (note) {
-        if (d.mining_simulation_enabled) {
-          note.style.display = "block";
-          note.innerHTML =
-            "<strong>CPU simulated ASIC:</strong> <code>blockvase-miner</code> uses <code>config.blockvase.simulate.yml</code>: real Stratum to local DATUM and Knots; only BM1366 hardware is bypassed.";
-        } else {
-          note.style.display = "none";
-          note.innerHTML = "";
-        }
-      }
-    })
-    .catch(() => {});
-}
-
-function saveMiningSimulation() {
-  const cb = document.getElementById("miningSimulationToggle");
-  const statusDiv = document.getElementById("miningSimulationStatus");
-  if (!cb) return;
-
-  showLoading("Saving...");
-  showStatus(statusDiv, "info", "Saving mining simulation preference...");
-  const payload = { mining_simulation_enabled: cb.checked };
-  if (setupToken) payload.token = setupToken;
-
-  fetch(withToken("/api/mining-simulation"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-    .then((r) =>
-      parseJsonResponse(r).then((d) => ({ ok: r.ok, d }))
-    )
-    .then(({ ok, d }) => {
-      hideLoading();
-      if (!ok || !d.success) {
-        showStatus(statusDiv, "error", d.error || "Request failed.");
-        return;
-      }
-      loadMiningSimulation();
-      const msg = d.message || "Mining simulation setting saved.";
-      showStatus(statusDiv, "success", msg);
-    })
-    .catch((err) => {
-      hideLoading();
-      showStatus(statusDiv, "error", "Error: " + err.message);
-    });
-}
-
 function saveMiningPayout(e) {
   e.preventDefault();
   const input = document.getElementById("miningPayoutAddress");
@@ -747,7 +692,6 @@ document.getElementById("wifiRpcForm")?.addEventListener("submit", saveAll);
 document.getElementById("deviceNameForm")?.addEventListener("submit", saveDeviceName);
 document.getElementById("adminLoginForm")?.addEventListener("submit", loginAdmin);
 document.getElementById("miningPayoutForm")?.addEventListener("submit", saveMiningPayout);
-document.getElementById("saveMiningSimulationBtn")?.addEventListener("click", saveMiningSimulation);
 document.getElementById("saveThemeBtn")?.addEventListener("click", saveTheme);
 
 let statsInterval = null;
@@ -764,7 +708,6 @@ async function startSettingsPage() {
   loadTheme();
   loadAdminCredentials();
   loadMiningPayout();
-  loadMiningSimulation();
   refreshUpdateAvailability(true);
   if (!statsInterval) statsInterval = setInterval(refreshStats, 5000);
   if (!updateCheckInterval) {

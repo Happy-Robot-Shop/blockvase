@@ -9,9 +9,6 @@
 #   BLOCKVASE_SKIP_MINING_STACK=1: skip building datum_gateway and PiAxe-miner systemd units
 #   Miner service is enabled by default (board/ASIC monitoring). Hashing via DATUM
 #   starts after the user saves a payout address on the Settings page.
-# Mining simulation (real DATUM/PiAxe stack, CPU replaces BM1366 only):
-#   Toggle is persisted in Settings (mining_simulation_enabled in data/config.json; default false).
-#   Enables config.blockvase.simulate.yml via blockvase-miner-refresh-env.sh; dashboard always reads PiAxe-miner REST.
 #
 # Optional (boot look & feel: all use scripts/disable-boot-splash.sh):
 #   BLOCKVASE_DISABLE_BOOT_SPLASH=1: hide Pi rainbow (config.txt) + drop Plymouth "splash" from cmdline.txt
@@ -133,7 +130,7 @@ done
 # Ensure config exists with setup_complete: false (shows setup QR on display)
 CONFIG_JSON="${PROJECT_DIR}/data/config.json"
 if [[ ! -f "${CONFIG_JSON}" ]]; then
-  echo '{"device_name":"blockvase","theme":"default","display_offset_x":0,"wifi_ssid":"","wifi_password":"","setup_complete":false,"setup_token":"","admin_username":"","admin_password_hash":"","mining_payout_address":"","mining_simulation_enabled":false,"rpc":{"host":"127.0.0.1","port":8332,"user":"","password":"","use_https":false,"timeout_seconds":8}}' \
+  echo '{"device_name":"blockvase","theme":"default","display_offset_x":0,"wifi_ssid":"","wifi_password":"","setup_complete":false,"setup_token":"","admin_username":"","admin_password_hash":"","mining_payout_address":"","rpc":{"host":"127.0.0.1","port":8332,"user":"","password":"","use_https":false,"timeout_seconds":8}}' \
     > "${CONFIG_JSON}"
   chown "${SERVICE_USER}:${SERVICE_USER}" "${CONFIG_JSON}" 2>/dev/null || true
 fi
@@ -385,7 +382,6 @@ echo "  Chain guard status: sudo ${PROJECT_DIR}/scripts/chain-guard.sh status"
 echo "  Manual reindex: sudo ${PROJECT_DIR}/scripts/reindex-chainstate.sh {start|status|finish}"
 echo "Mining (solo): datum-gateway.service + blockvase-miner.service (DATUM → Stratum :23334 → PiAxe)"
 echo "  Miner runs by default (graceful if ASIC/board is missing). Save a payout address in Settings to start hashing."
-echo "  Optional CPU simulated-ASIC tests: enable mining simulation under Settings → Solo Mining (DATUM/bitcoind unchanged)."
 echo "Kiosk: blockvase-kiosk.service (startx, vt7, ~/logs/kiosk-browser.log)"
 echo "  Also: blockvase-switch-to-kiosk-vt.service (chvt 7 before kiosk, blank HDMI until X)"
 echo "  Check: sudo systemctl status blockvase-kiosk.service  (expect active/running)"
