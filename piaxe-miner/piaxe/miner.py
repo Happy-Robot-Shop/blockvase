@@ -261,13 +261,29 @@ class BM1366Miner:
                 )
                 time.sleep(3.0)
 
-        if self.hardware is not None and hasattr(self.hardware, "enable_asic_power"):
-            self.hardware.enable_asic_power()
+        def _enable_asic_power_safe():
+            timeout_sec = float(board_cfg.get("asic_power_good_timeout_sec", 8.0))
+            abort_temp = board_cfg.get("asic_power_abort_temp_c")
+            if abort_temp is None:
+                # Leave a few degrees of headroom under the hard thermal shutdown.
+                abort_temp = max(60.0, self.max_board_temp_c - 7.0)
+            else:
+                abort_temp = float(abort_temp)
+            self.hardware.enable_asic_power(
+                timeout_sec=timeout_sec,
+                abort_temp_c=abort_temp,
+            )
             time.sleep(float(board_cfg.get("asic_power_settle_sec", 3.0)))
 
         # currently the qaxe+ needs this loop :see-no-evil:
         for attempt in range(max_retries):
             try:
+                if (
+                    self.miner == "piaxe"
+                    and self.hardware is not None
+                    and hasattr(self.hardware, "enable_asic_power")
+                ):
+                    _enable_asic_power_safe()
                 chip_counter = self.asics.init(
                     self.hardware.get_asic_frequency(),
                     self.hardware.get_chip_count(),
@@ -278,7 +294,7 @@ class BM1366Miner:
                 self.asic_initialized = True
                 break
             except Exception as e:
-                logging.error("Attempt %d: Not enough chips found: %s", attempt + 1, e)
+                logging.error("Attempt %d: ASIC init/power failed: %s", attempt + 1, e)
 
                 # only retry on 1368s
                 if not isinstance(self.asics, bm1366.BM1368):
@@ -287,11 +303,9 @@ class BM1366Miner:
                         and self.miner == "piaxe"
                         and self.hardware is not None
                     ):
-                        logging.info("Retrying ASIC init after power cycle...")
+                        logging.info("Retrying ASIC init after cool-down power cycle...")
                         self.hardware.shutdown()
                         time.sleep(float(board_cfg.get("asic_power_retry_sec", 8.0)))
-                        self.hardware.enable_asic_power()
-                        time.sleep(float(board_cfg.get("asic_power_settle_sec", 3.0)))
                         continue
                     logging.error("ASIC init failed; LM75/REST monitoring continues without hashing.")
                     if self.miner == "piaxe" and self.hardware is not None:

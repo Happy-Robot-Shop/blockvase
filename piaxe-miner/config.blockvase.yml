@@ -14,20 +14,25 @@ piaxe:
   # Pi 4 / earlier: omit (defaults to bus 1). Pi 5: often 13 (auto-detected if unset).
   # i2c_bus: 13
   # Participation mode: stay online at low clock; hashrate is secondary.
-  asic_frequency: 62.5
-  max_board_temp_c: 95
-  asic_init_max_temp_c: 72
-  asic_power_settle_sec: 5
-  asic_power_retry_sec: 15
-  frequency_ramp_start_mhz: 56.25
-  frequency_ramp_step_delay_sec: 2.5
-  frequency_ramp_pause_temp_c: 82
-  frequency_ramp_cooldown_temp_c: 74
+  # Heat spike on power-up is usually the buck/PGOOD path, not hashing load —
+  # keep clock low, abort stuck power-ups quickly, and cool longer between tries.
+  asic_frequency: 50
+  max_board_temp_c: 92
+  asic_init_max_temp_c: 70
+  asic_power_settle_sec: 3
+  asic_power_retry_sec: 45
+  asic_power_good_timeout_sec: 5
+  asic_power_abort_temp_c: 85
+  frequency_ramp_start_mhz: 43.75
+  frequency_ramp_step_delay_sec: 3.0
+  frequency_ramp_pause_temp_c: 78
+  frequency_ramp_cooldown_temp_c: 68
   sdn_pin: 11
   pgood_pin: 13
   nrst_pin: 15
   led_pin: 19
   pwm_hz: 1000
+  # HAT fan: always full speed (driver forces 100% regardless of this value).
   pwm_duty_cycle: 100
   lm75_address: 0x48
   extranonce2_interval: 1.5

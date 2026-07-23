@@ -80,8 +80,12 @@ class RPiHardware(board.Board):
             ) from e
         logging.info("PiAxe SMBus: /dev/i2c-%s (LM75 0x%02x)", i2c_n, int(self.config["lm75_address"]))
 
-        pwm = HardwarePWM(pwm_channel=0, hz=self.config['pwm_hz'])
-        pwm.start(self.config['pwm_duty_cycle'])
+        # Keep the PWM object alive for the process lifetime. Always run the HAT
+        # fan at full speed (100% duty); thermal headroom matters more than noise.
+        self._pwm = HardwarePWM(pwm_channel=0, hz=self.config['pwm_hz'])
+        self._fan_duty = 100.0
+        self._pwm.start(self._fan_duty)
+        logging.info("HAT fan PWM channel 0 set to %.0f%% duty (full speed)", self._fan_duty)
 
         # Initialize serial communication
         self._serial_port = serial.Serial(
@@ -93,11 +97,34 @@ class RPiHardware(board.Board):
             timeout=1                      # Set a read timeout
         )
 
-    def enable_asic_power(self):
+    def enable_asic_power(self, timeout_sec=8.0, abort_temp_c=None):
+        """Enable the buck and wait for PGOOD.
+
+        If PGOOD never asserts, leave SDN high only briefly — a stuck regulator
+        loop can heat the board by ~15°C in a few seconds with no hashing.
+        """
         GPIO.output(self.sdn_pin, True)
-        while (not self._is_power_good()):
+        deadline = time.monotonic() + max(0.5, float(timeout_sec))
+        while not self._is_power_good():
+            if abort_temp_c is not None:
+                try:
+                    board_t = self.read_temperature_and_voltage()["temp"][0]
+                except Exception as ex:
+                    logging.warning("Power-up temp read failed: %s", ex)
+                    board_t = None
+                if board_t is not None and board_t > float(abort_temp_c):
+                    GPIO.output(self.sdn_pin, False)
+                    raise RuntimeError(
+                        "ASIC power aborted: board %.1f°C > %.1f°C while waiting for PGOOD"
+                        % (board_t, float(abort_temp_c))
+                    )
+            if time.monotonic() >= deadline:
+                GPIO.output(self.sdn_pin, False)
+                raise TimeoutError(
+                    "ASIC power good timed out after %.1fs (buck disabled)" % float(timeout_sec)
+                )
             logging.info("power not good ... waiting ...")
-            time.sleep(1)
+            time.sleep(0.5)
 
     def _is_power_good(self):
         # SiC431 open-drain PG with pull-up to 3V3: HIGH = in regulation.
@@ -105,7 +132,20 @@ class RPiHardware(board.Board):
         return GPIO.input(self.pgood_pin)
 
     def set_fan_speed(self, channel, speed):
-        pass
+        # PiAxe has a single HAT fan on hardware PWM0. Ignore channel and keep
+        # full speed unless an explicit 0..1 request arrives (REST compatibility).
+        if self._pwm is None:
+            return
+        try:
+            duty = float(speed)
+        except (TypeError, ValueError):
+            duty = 100.0
+        if 0.0 <= duty <= 1.0:
+            duty *= 100.0
+        # Participation / thermal mode: never leave the fan below full blast.
+        duty = 100.0
+        self._fan_duty = duty
+        self._pwm.change_duty_cycle(duty)
 
     def read_temperature_and_voltage(self):
         data = self._bus.read_i2c_block_data(self.lm75_address, 0, 2)
@@ -137,10 +177,14 @@ class RPiHardware(board.Board):
 
 
     def shutdown(self):
-        # disable buck converter
+        # disable buck converter; keep the HAT fan at full speed for cooldown
         logging.info("shutdown miner ...")
         GPIO.output(self.sdn_pin, False)
         self.set_led(False)
+        try:
+            self.set_fan_speed(0, 1.0)
+        except Exception as ex:
+            logging.warning("Could not keep HAT fan at full speed after shutdown: %s", ex)
 
     def serial_port(self):
         return self._serial_port

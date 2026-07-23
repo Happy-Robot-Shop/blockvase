@@ -13,7 +13,8 @@ EnvironmentFile=-/etc/blockvase/miner.env
 Environment=PYTHONUNBUFFERED=1
 ExecStart=__PROJECT_DIR__/scripts/blockvase-miner-run.sh
 Restart=always
-RestartSec=10
+# Longer pause after thermal/power failures so the board can cool with SDN off.
+RestartSec=45
 
 [Install]
 WantedBy=multi-user.target
