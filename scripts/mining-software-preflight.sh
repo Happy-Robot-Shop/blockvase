@@ -50,9 +50,9 @@ if [[ -n "${config_file}" ]]; then
   fi
 
   if grep -Fq 'dtoverlay=pwm' "${config_file}"; then
-    pass "dtoverlay=pwm present in ${config_file} (PiAxe buck converter)"
+    pass "dtoverlay=pwm present in ${config_file} (PiAxe fan PWM on GPIO18)"
   else
-    fail "dtoverlay=pwm missing from ${config_file}; PiAxe buck PWM may not work until added and rebooted."
+    fail "dtoverlay=pwm missing from ${config_file}; PiAxe fan PWM overlay missing until added and rebooted."
   fi
 else
   warn "could not find config.txt"

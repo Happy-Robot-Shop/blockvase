@@ -165,13 +165,17 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 **How we use it**
 
 - **Hardware:** Blockvase ships a modified PiAxe HAT. Design files and schematics live under `hardware/piaxe/`. The main change versus the original OSMU PiAxe is **single USB-C power** for the entire stack (Raspberry Pi + miner HAT), instead of the stock PiAxe power arrangement.
-- **Software:** Vendored under `piaxe-miner/`, launched by `scripts/blockvase-miner-run.sh` / `systemd/blockvase-miner.service`.
+- **Software:** Vendored under `piaxe-miner/` (not cloned at bootstrap). Launched by `scripts/blockvase-miner-run.sh` / `systemd/blockvase-miner.service`.
 - Default config: `piaxe-miner/config.blockvase.yml`.
 - Connects to **local DATUM only** (`stratum+tcp://127.0.0.1:23334`) when a payout address is set. It never connects to an external Stratum pool URL.
+- **Bootstrap patches:** `scripts/install-mining-stack.sh` runs `scripts/apply-piaxe-miner-patches.sh`, which applies idempotent diffs from `scripts/patches/piaxe-miner/` before creating the Python venv. That path matters if you replace `piaxe-miner/` with a fresh upstream tree; a normal Blockvase checkout already includes the same changes inline.
 
 **Blockvase modifications**
 
 - **HAT redesign (hardware):** Single USB-C input powers the full device (Pi + BM1366 HAT). Schematics and related files are in `hardware/piaxe/` (derived from the open [PiAxe](https://github.com/shufps/piaxe) design).
+- **DATUM Stratum integration:** negotiate `mining.configure` version-rolling so share headers match DATUM Gateway (without this, DATUM rejects shares as `H-not-zero`). See `pyminer.py`, `shared/shared.py`, and `scripts/patches/piaxe-miner/001-datum-version-rolling.patch`.
+- **HAT bring-up:** corrected NRST / PGOOD polarity for the Blockvase HAT inverter and power-good sense (`piaxe/boards/piaxe.py`).
+- **Thermal / reliability:** PLL-safe frequency ramp, init cooldown, PGOOD abort on overheating, full-speed fan drive (`piaxe/miner.py`, `piaxe/bm1366.py`, `piaxe/boards/piaxe.py`, config).
 - **Graceful hardware failure:** board/GPIO/I2C init failures no longer kill the process; REST stays up when possible (`piaxe/miner.py`).
 - **Graceful ASIC failure:** chip enumeration failure keeps LM75/REST monitoring without hashing (extended soft-fail path).
 - **Monitoring without payout:** miner service can run with an empty Stratum user; no hashing until Settings saves a payout (`pyminer.py`, `blockvase-miner-run.sh`).
@@ -243,7 +247,7 @@ The Blockvase web app also uses common Python packages (see `requirements.txt`),
 |----------|--------------|------------------|-----------------|
 | Bitcoin Knots | No (release install) | No | Install script, systemd, RPC/portal |
 | DATUM Gateway | `datum_gateway/` | Integration only | Build, systemd, generated config |
-| piaxe-miner / PyMiner | `piaxe-miner/` | Yes (reliability + Blockvase ops) | Configs, systemd, soft-fail, payout gating |
+| piaxe-miner / PyMiner | `piaxe-miner/` | Yes (reliability + DATUM + HAT ops) | Configs, systemd, soft-fail, payout gating, version-rolling, thermal bring-up; bootstrap patches in `scripts/patches/piaxe-miner/` |
 | PiAxe HAT (OSMU / shufps) | `hardware/piaxe/` | Yes (power delivery) | Single USB-C for full stack; schematics in repo |
 | D-Central (PiAxe ecosystem) | No | No | Attribution; PiAxe manufacturing / OSMU support |
 | Raspberry Pi OS | No | Image/scripts only | Bootstrap, kiosk, AP, clone path |
@@ -285,7 +289,7 @@ Run install commands over **SSH** if a desktop is already on screen. Bootstrap t
 3. After reboot, join the device’s setup Wi-Fi (QR on the HDMI screen, or scan with your phone).
 4. Open the setup page, create an admin username and password, and enter your home Wi-Fi. The Pi will join that network and reboot.
 
-**What bootstrap installs:** packages, Bitcoin Knots, the mining stack (miner enabled for board monitoring; hashing starts after you save a payout address), systemd services, and kiosk mode. It also records a device fingerprint in `/var/lib/blockvase/device-identity.env`. Re-running bootstrap updates the software and does **not** wipe the blockchain.
+**What bootstrap installs:** packages, Bitcoin Knots, the mining stack (UART/I2C/PWM prep, DATUM build, piaxe-miner venv, and any `scripts/patches/piaxe-miner/*.patch`; miner enabled for board monitoring; hashing starts after you save a payout address), systemd services, and kiosk mode. It also records a device fingerprint in `/var/lib/blockvase/device-identity.env`. Re-running bootstrap updates the software and does **not** wipe the blockchain.
 
 **Disk space:** a full archival node needs **hundreds of GB** free (SSD/NVMe recommended).
 

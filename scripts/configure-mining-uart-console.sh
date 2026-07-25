@@ -60,7 +60,7 @@ ensure_overlay_line() {
   fi
   {
     echo ""
-    echo "# Added by Blockvase: PiAxe buck converter PWM (GPIO18 / physical pin 12)"
+    echo "# Added by Blockvase: PiAxe fan PWM capability (GPIO18 / physical pin 12)"
     echo "${line}"
   } >>"${CONFIG_TXT}"
 }

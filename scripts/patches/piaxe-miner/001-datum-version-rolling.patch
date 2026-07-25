@@ -1,0 +1,116 @@
+--- pyminer.py
++++ pyminer.py
+@@ -299,6 +299,10 @@ class Miner(SimpleJsonRpcClient):
+ 
+   class MinerAuthenticationException(SimpleJsonRpcClient.RequestReplyException): pass
+ 
++  # DATUM Gateway (Braiins-style) version-rolling mask; BM1366 rolls into bits 13+.
++  DATUM_VERSION_ROLLING_MASK = "1fffe000"
++  DATUM_VERSION_ROLLING_MIN_BITS = 16
++
+   def __init__(self, url, username, password, miner, suggest_difficulty):
+     SimpleJsonRpcClient.__init__(self)
+ 
+@@ -315,6 +319,8 @@ class Miner(SimpleJsonRpcClient):
+     self._miner.set_submit_callback(self.mining_submit)
+ 
+     self._accepted_shares = 0
++    self._version_rolling_enabled = False
++    self._version_rolling_mask = 0
+ 
+   # Accessors
+   url = property(lambda s: s._url)
+@@ -322,11 +328,41 @@ class Miner(SimpleJsonRpcClient):
+   password = property(lambda s: s._password)
+ 
+ 
++  def _send_version_rolling_configure(self):
++    """Negotiate version-rolling so pool/DATUM applies param[5] when rebuilding block headers."""
++    self.send(
++      method='mining.configure',
++      params=[
++        ['version-rolling'],
++        {
++          'version-rolling.mask': self.DATUM_VERSION_ROLLING_MASK,
++          'version-rolling.min-bit-count': self.DATUM_VERSION_ROLLING_MIN_BITS,
++        },
++      ],
++    )
++
++  def _authorize_worker(self):
++    self.send(method='mining.authorize', params=[self.username, self.password])
++
+   # Overridden from SimpleJsonRpcClient
+   def handle_reply(self, request, reply):
+ 
++    method = reply.get('method')
++
++    # Server push after mining.configure (DATUM sends mask out-of-band).
++    if method == 'mining.set_version_mask':
++      params = reply.get('params') or []
++      if params:
++        try:
++          self._version_rolling_mask = int(str(params[0]), 16)
++          self._version_rolling_enabled = True
++          logging.info('Version rolling mask set: %#x', self._version_rolling_mask)
++        except (TypeError, ValueError):
++          logging.warning('Invalid mining.set_version_mask params: %r', params)
++      return
++
+     # New work, stop what we were doing before, and start on this.
+-    if reply.get('method') == 'mining.notify':
++    if method == 'mining.notify':
+       if 'params' not in reply or len(reply['params']) != 9:
+         raise self.MinerWarning('Malformed mining.notify message', reply)
+ 
+@@ -351,7 +387,7 @@ class Miner(SimpleJsonRpcClient):
+       logging.debug('New job: job_id=%s' % job_id)
+ 
+     # The server wants us to change our difficulty (on all *future* work)
+-    elif reply.get('method') == 'mining.set_difficulty':
++    elif method == 'mining.set_difficulty':
+       if 'params' not in reply or len(reply['params']) != 1:
+         raise self.MinerWarning('Malformed mining.set_difficulty message', reply)
+ 
+@@ -385,8 +421,27 @@ class Miner(SimpleJsonRpcClient):
+ 
+         logging.debug('Subscribed: subscription_id=%s' % notify_subscription_id)
+ 
+-        # Request authentication
+-        self.send(method = 'mining.authorize', params = [ self.username, self.password ])
++        # Negotiate version-rolling before authorize (required for DATUM share validation).
++        self._send_version_rolling_configure()
++
++      # ...configure; then authorize (pools without configure still get authorize on error)
++      elif request.get('method') == 'mining.configure':
++        if reply.get('error'):
++          logging.warning('mining.configure rejected: %s', reply.get('error'))
++        else:
++          result = reply.get('result') or {}
++          if result.get('version-rolling'):
++            self._version_rolling_enabled = True
++            mask = result.get('version-rolling.mask', self.DATUM_VERSION_ROLLING_MASK)
++            try:
++              self._version_rolling_mask = int(str(mask), 16)
++            except (TypeError, ValueError):
++              self._version_rolling_mask = int(self.DATUM_VERSION_ROLLING_MASK, 16)
++            logging.info(
++              'Version rolling enabled (mask=%#x)',
++              self._version_rolling_mask,
++            )
++        self._authorize_worker()
+ 
+       # ...authorize; if we failed to authorize, quit
+       elif request.get('method') == 'mining.authorize':
+--- shared/shared.py
++++ shared/shared.py
+@@ -397,7 +397,8 @@ def verify_work(difficulty, job, result):
+     if job._job_id != result['job_id']:
+         raise Exception("job_ids mismatch")
+ 
+-    header = swap_endian_word(int_to_hex32(int(job._version, 16) ^ int(result['version'], 16)))
++    # Match pool/DATUM header rebuild (version |= rolled_bits); XOR differs if base bits are set.
++    header = swap_endian_word(int_to_hex32(int(job._version, 16) | int(result['version'], 16)))
+     header += swap_endian_words(job._prevhash)
+     header += swap_endian_words(job._merkle_root)
+     header += swap_endian_words(result['ntime'])

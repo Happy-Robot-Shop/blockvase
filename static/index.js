@@ -346,14 +346,7 @@ function renderPortalSyncPendingMetrics(syncState, statusEl, beforeEl, upperDeta
       '<div class="metric-cluster-divider" aria-hidden="true"></div>' +
       metricClusterHtml(
         "Mining",
-        metricKvHtml([
-          ["Hash rate", pending],
-          ["Accepted", pending],
-          ["Temperature", pending],
-          ["Uptime", pending],
-          ["Difficulty", pending],
-          ["Errors", pending],
-        ])
+        '<div id="compactMiningSummary" aria-label="Solo mining summary"><div class="portal-compact-note">Loading…</div></div>'
       ) +
       '<div class="metric-cluster-divider" aria-hidden="true"></div>' +
       metricClusterHtml(
@@ -774,7 +767,6 @@ function loadDeviceName() {
 async function loadMiningSection() {
   const host = document.getElementById("compactMiningSummary");
   if (!host) return;
-  if (document.body.classList.contains("portal-chain-syncing")) return;
 
   function renderMiningSummary(d, available) {
     const hrHs = available ? Number(d.hashrate_hs) || 0 : 0;
@@ -785,9 +777,18 @@ async function loadMiningSection() {
     const diffStr =
       available && Number.isFinite(difficulty) && difficulty > 0 ? formatDifficulty(difficulty) : "n/a";
     const errors = available ? formatNumber(d.pool_errors || 0) : "0";
+    const ramping =
+      available &&
+      hrHs <= 0 &&
+      accepted <= 0 &&
+      d.temperature_c != null &&
+      Number.isFinite(Number(d.temperature_c));
     const hashParts = formatHashRateParts(hrHs);
+    const hashLabel = ramping
+      ? "Starting…"
+      : hashParts.value + (hashParts.unit ? " " + hashParts.unit : "");
     const rows = [
-      ["Hash rate", hashParts.value + (hashParts.unit ? " " + hashParts.unit : "")],
+      ["Hash rate", hashLabel],
       ["Accepted", formatNumber(accepted)],
       ["Temperature", temp],
       ["Uptime", uptime],
@@ -801,9 +802,19 @@ async function loadMiningSection() {
       rows.forEach(function (row) {
         if (!patchMetricKv(host, row[0], row[1])) ok = false;
       });
-      if (ok) return;
+      if (ok) {
+        const note = host.querySelector(".portal-compact-note");
+        if (note) note.remove();
+        return;
+      }
     }
-    host.innerHTML = metricKvHtml(rows);
+    const reason =
+      !available && d && d.unavailable_reason
+        ? '<p class="portal-compact-note portal-mining-unavailable">' +
+          metricEscape(String(d.unavailable_reason)) +
+          "</p>"
+        : "";
+    host.innerHTML = reason + metricKvHtml(rows);
   }
 
   try {
@@ -812,7 +823,10 @@ async function loadMiningSection() {
     renderMiningSummary(d, Boolean(d.available));
     portalMiningEverRendered = true;
   } catch (e) {
-    if (!portalMiningEverRendered) return;
+    if (!portalMiningEverRendered && host.querySelector(".portal-compact-note")) {
+      host.innerHTML =
+        '<p class="portal-compact-note portal-mining-unavailable">Mining metrics unavailable</p>';
+    }
   }
 }
 

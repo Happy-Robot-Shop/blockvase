@@ -5,7 +5,7 @@
 # so Xorg can open the virtual console (see systemd template). The full desktop is not used; see restore-desktop-boot.sh.
 #
 # Solo mining (DATUM Gateway + PiAxe-miner: scripts/install-mining-stack.sh after Bitcoin Knots):
-#   configure-mining-uart-console.sh runs first: enable_uart, i2c_arm, dtoverlay=pwm (PiAxe buck), serial0 console cleanup
+#   configure-mining-uart-console.sh runs first: enable_uart, i2c_arm, dtoverlay=pwm (PiAxe fan), serial0 console cleanup
 #   BLOCKVASE_SKIP_MINING_STACK=1: skip building datum_gateway and PiAxe-miner systemd units
 #   Miner service is enabled by default (board/ASIC monitoring). Hashing via DATUM
 #   starts after the user saves a payout address on the Settings page.

@@ -12,12 +12,6 @@ except ImportError as e:
     _gpio_import_error = e
 
 try:
-    from rpi_hardware_pwm import HardwarePWM
-except ImportError as e:
-    HardwarePWM = None  # type: ignore[assignment, misc]
-    _gpio_import_error = _gpio_import_error or e
-
-try:
     import smbus
 except ImportError as e:
     smbus = None  # type: ignore[assignment, misc]
@@ -30,8 +24,6 @@ class RPiHardware(board.Board):
         missing = []
         if GPIO is None:
             missing.append("RPi.GPIO")
-        if HardwarePWM is None:
-            missing.append("rpi_hardware_pwm")
         if smbus is None:
             missing.append("smbus")
         if missing:
@@ -80,12 +72,11 @@ class RPiHardware(board.Board):
             ) from e
         logging.info("PiAxe SMBus: /dev/i2c-%s (LM75 0x%02x)", i2c_n, int(self.config["lm75_address"]))
 
-        # Keep the PWM object alive for the process lifetime. Always run the HAT
-        # fan at full speed (100% duty); thermal headroom matters more than noise.
-        self._pwm = HardwarePWM(pwm_channel=0, hz=self.config['pwm_hz'])
-        self._fan_duty = 100.0
-        self._pwm.start(self._fan_duty)
-        logging.info("HAT fan PWM channel 0 set to %.0f%% duty (full speed)", self._fan_duty)
+        # HAT 4-pin fan PWM is GPIO18 / physical pin 12 (fan only; buck uses SDN).
+        # dtoverlay=pwm leaves the pin in PWM mode with pull-down (reads low) which
+        # stops the Noctua. Drive BOARD pin 12 as GPIO high for always-on full speed.
+        self._fan_pwm_pin = int(self.config.get("fan_pwm_pin", 12))
+        self._force_fan_full()
 
         # Initialize serial communication
         self._serial_port = serial.Serial(
@@ -131,21 +122,36 @@ class RPiHardware(board.Board):
         # (Do not invert — LED1 on the PGOOD net lights when power is NOT good.)
         return GPIO.input(self.pgood_pin)
 
-    def set_fan_speed(self, channel, speed):
-        # PiAxe has a single HAT fan on hardware PWM0. Ignore channel and keep
-        # full speed unless an explicit 0..1 request arrives (REST compatibility).
-        if self._pwm is None:
-            return
+    def _release_pwm0(self):
+        """Release hardware PWM0 so GPIO18 can be used as a plain output."""
+        enable_path = "/sys/class/pwm/pwmchip0/pwm0/enable"
+        unexport_path = "/sys/class/pwm/pwmchip0/unexport"
         try:
-            duty = float(speed)
-        except (TypeError, ValueError):
-            duty = 100.0
-        if 0.0 <= duty <= 1.0:
-            duty *= 100.0
-        # Participation / thermal mode: never leave the fan below full blast.
-        duty = 100.0
-        self._fan_duty = duty
-        self._pwm.change_duty_cycle(duty)
+            if os.path.exists(enable_path):
+                with open(enable_path, "w", encoding="utf-8") as f:
+                    f.write("0\n")
+            if os.path.exists(unexport_path) and os.path.isdir("/sys/class/pwm/pwmchip0/pwm0"):
+                with open(unexport_path, "w", encoding="utf-8") as f:
+                    f.write("0\n")
+        except OSError as ex:
+            logging.debug("HAT fan: PWM0 release: %s", ex)
+
+    def _force_fan_full(self):
+        """Hold fan PWM pin high so the Noctua runs at full speed."""
+        self._release_pwm0()
+        try:
+            GPIO.setup(self._fan_pwm_pin, GPIO.OUT, initial=GPIO.HIGH)
+            GPIO.output(self._fan_pwm_pin, GPIO.HIGH)
+            logging.info(
+                "HAT fan: BOARD pin %s held HIGH (always-on full speed)",
+                self._fan_pwm_pin,
+            )
+        except Exception as ex:
+            logging.warning("HAT fan: could not drive pin %s high: %s", self._fan_pwm_pin, ex)
+
+    def set_fan_speed(self, channel, speed):
+        # Always-on cooling: ignore speed requests and keep the pin high.
+        self._force_fan_full()
 
     def read_temperature_and_voltage(self):
         data = self._bus.read_i2c_block_data(self.lm75_address, 0, 2)
@@ -177,14 +183,11 @@ class RPiHardware(board.Board):
 
 
     def shutdown(self):
-        # disable buck converter; keep the HAT fan at full speed for cooldown
+        # disable buck converter; keep fan PWM high for full-speed cooldown
         logging.info("shutdown miner ...")
         GPIO.output(self.sdn_pin, False)
         self.set_led(False)
-        try:
-            self.set_fan_speed(0, 1.0)
-        except Exception as ex:
-            logging.warning("Could not keep HAT fan at full speed after shutdown: %s", ex)
+        self._force_fan_full()
 
     def serial_port(self):
         return self._serial_port

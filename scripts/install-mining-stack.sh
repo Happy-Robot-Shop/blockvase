@@ -73,6 +73,12 @@ if [[ ! -d "${MINER_DIR}" ]]; then
   exit 1
 fi
 
+APPLY_PATCHES="${PROJECT_DIR}/scripts/apply-piaxe-miner-patches.sh"
+if [[ -x "${APPLY_PATCHES}" ]]; then
+  echo "       [mining] Applying piaxe-miner patches (DATUM integration, etc.)..."
+  "${APPLY_PATCHES}" "${MINER_DIR}"
+fi
+
 echo "       [mining] PiAxe-miner Python venv..."
 # --system-site-packages: Pi 5+ needs distro RPi/GPIO shim (python3-rpi-lgpio); do not pip-install RPi.GPIO (wrong SoC pins).
 rm -rf "${MINER_DIR}/.venv"

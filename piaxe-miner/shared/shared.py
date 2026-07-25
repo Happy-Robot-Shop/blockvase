@@ -397,7 +397,8 @@ def verify_work(difficulty, job, result):
     if job._job_id != result['job_id']:
         raise Exception("job_ids mismatch")
 
-    header = swap_endian_word(int_to_hex32(int(job._version, 16) ^ int(result['version'], 16)))
+    # Match pool/DATUM header rebuild (version |= rolled_bits); XOR differs if base bits are set.
+    header = swap_endian_word(int_to_hex32(int(job._version, 16) | int(result['version'], 16)))
     header += swap_endian_words(job._prevhash)
     header += swap_endian_words(job._merkle_root)
     header += swap_endian_words(result['ntime'])

@@ -11,26 +11,29 @@ suggest_difficulty: 2048
 piaxe:
   name: PiAxe
   chips: 1
-  # Participation mode: stay online at low clock; hashrate is secondary.
-  # Heat spike on power-up is usually the buck/PGOOD path, not hashing load —
-  # keep clock low, abort stuck power-ups quickly, and cool longer between tries.
-  asic_frequency: 50
-  max_board_temp_c: 92
+  # Enclosure mode: max sustained hashrate with tighter thermal headroom.
+  # Open-air was ~55°C at 525 MHz; case soak needs a lower ceiling + slower ramp.
+  # 225 MHz reached ~77.5°C toward 78 trip (tripped twice already) — step down.
+  asic_frequency: 200
+  max_board_temp_c: 78
   asic_init_max_temp_c: 70
   asic_power_settle_sec: 3
   asic_power_retry_sec: 45
   asic_power_good_timeout_sec: 5
-  asic_power_abort_temp_c: 85
-  frequency_ramp_start_mhz: 43.75
-  frequency_ramp_step_delay_sec: 3.0
-  frequency_ramp_pause_temp_c: 78
+  asic_power_abort_temp_c: 74
+  frequency_ramp_start_mhz: 56.25
+  frequency_ramp_step_mhz: 6.25
+  frequency_ramp_step_delay_sec: 2.0
+  frequency_ramp_pause_temp_c: 74
   frequency_ramp_cooldown_temp_c: 68
   sdn_pin: 11
   pgood_pin: 13
   nrst_pin: 15
   led_pin: 19
-  pwm_hz: 1000
-  # HAT fan: always full speed (driver forces 100% regardless of this value).
+  # Fan PWM wire is BOARD pin 12 (GPIO18). Driver holds it GPIO-high for
+  # always-on full speed (hardware PWM alt + pull-down stops this Noctua).
+  fan_pwm_pin: 12
+  pwm_hz: 25000
   pwm_duty_cycle: 100
   lm75_address: 0x48
   extranonce2_interval: 1.5
