@@ -37,7 +37,10 @@ from .mining_wallet import (
     address_is_mine,
     new_mining_payout_address,
     node_sync_status,
+    send_from_wallet,
     validate_bitcoin_address,
+    wallet_balances,
+    wallet_recent_transactions,
 )
 from .state import StateManager
 from .totp import generate_secret, otpauth_uri, verify_totp
@@ -846,6 +849,17 @@ def settings():
     return response
 
 
+@app.get("/wallet")
+def wallet_page():
+    cfg = load_config()
+    if _needs_setup_ui(cfg):
+        return redirect(url_for("setup_page", token=cfg.get("setup_token", "")))
+    response = make_response(render_template("wallet.html", theme=_theme()))
+    if _is_token_valid(cfg, _request_admin_token()):
+        return _set_admin_cookie(response, cfg)
+    return response
+
+
 @app.get("/setup")
 def setup_page():
     cfg = load_config()
@@ -1204,6 +1218,108 @@ def generate_mining_payout():
         message=data.get("message") or msg,
         **{k: sync_fields[k] for k in sync_fields},
     )
+
+
+def _wallet_snapshot(cfg: dict[str, Any], *, receive_address: str | None = None) -> dict[str, Any]:
+    rpc_cfg = cfg.get("rpc") or {}
+    sync = node_sync_status(state.rpc, rpc_cfg)
+    balances = wallet_balances(state.rpc, rpc_cfg)
+    address = (receive_address or "").strip()
+    if not address:
+        # Fresh address on each wallet page load (unused gap addresses are fine).
+        address = new_mining_payout_address(state.rpc, rpc_cfg)
+    txs = wallet_recent_transactions(state.rpc, rpc_cfg, count=15)
+    return {
+        "receive_address": address,
+        "trusted": balances.get("trusted", 0.0),
+        "untrusted_pending": balances.get("untrusted_pending", 0.0),
+        "immature": balances.get("immature", 0.0),
+        "transactions": txs,
+        "initialblockdownload": bool(sync.get("initialblockdownload")),
+        "mining_ready": bool(sync.get("ready")),
+        "blocks": int(sync.get("blocks") or 0),
+        "headers": int(sync.get("headers") or 0),
+    }
+
+
+@app.get("/api/wallet")
+def get_wallet():
+    cfg = load_config()
+    token_err = _require_admin_token(cfg)
+    if token_err:
+        return token_err
+    try:
+        return jsonify(_wallet_snapshot(cfg))
+    except Exception as ex:
+        _log.exception("wallet status failed")
+        return _json_err(f"Could not load wallet: {ex}", 500)
+
+
+@app.post("/api/wallet/receive")
+def wallet_new_receive():
+    cfg = load_config()
+    token_err = _require_admin_token(cfg)
+    if token_err:
+        return token_err
+    try:
+        address = new_mining_payout_address(state.rpc, cfg.get("rpc") or {})
+        snap = _wallet_snapshot(cfg, receive_address=address)
+        return _json_ok(**snap)
+    except Exception as ex:
+        _log.exception("wallet receive address failed")
+        return _json_err(f"Could not generate receive address: {ex}", 500)
+
+
+@app.get("/api/wallet/receive-qr.svg")
+def wallet_receive_qr():
+    cfg = load_config()
+    token_err = _require_admin_token(cfg)
+    if token_err:
+        return token_err
+    address = str(request.args.get("address", "") or "").strip()
+    if not address or not validate_bitcoin_address(state.rpc, cfg.get("rpc") or {}, address):
+        return _json_err("Valid address required", 400)
+    payload = f"bitcoin:{address}"
+    img = qrcode.make(payload, image_factory=SvgImage)
+    buf = BytesIO()
+    img.save(buf)
+    response = make_response(buf.getvalue())
+    response.headers["Content-Type"] = "image/svg+xml"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/api/wallet/send")
+def wallet_send():
+    body = request.get_json(force=True, silent=True) or {}
+    cfg = load_config()
+    token_err = _require_admin_token(cfg, body)
+    if token_err:
+        return token_err
+    address = str(body.get("address", "") or "").strip()
+    try:
+        amount = float(body.get("amount"))
+    except (TypeError, ValueError):
+        return _json_err("Amount must be a number (BTC).")
+    subtract = bool(body.get("subtract_fee_from_amount"))
+    sync = node_sync_status(state.rpc, cfg.get("rpc") or {})
+    if sync.get("initialblockdownload"):
+        return _json_err(
+            "Node is still syncing (IBD). Wait until sync finishes before sending.",
+            400,
+        )
+    try:
+        txid = send_from_wallet(
+            state.rpc,
+            cfg.get("rpc") or {},
+            address=address,
+            amount_btc=amount,
+            subtract_fee_from_amount=subtract,
+        )
+    except Exception as ex:
+        _log.exception("wallet send failed")
+        return _json_err(str(ex), 400)
+    return _json_ok(txid=txid, message="Transaction broadcast.")
 
 
 @app.get("/api/display-offset")

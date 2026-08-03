@@ -126,3 +126,75 @@ def validate_bitcoin_address(rpc: BitcoinRpcClient, rpc_cfg: dict[str, Any], add
     except RuntimeError:
         return False
     return bool(isinstance(info, dict) and info.get("isvalid"))
+
+
+def wallet_balances(rpc: BitcoinRpcClient, rpc_cfg: dict[str, Any]) -> dict[str, float]:
+    """Trusted / untrusted / immature balances in BTC for the device wallet."""
+    ensure_mining_wallet(rpc, rpc_cfg)
+    cfg = wallet_rpc_cfg(rpc_cfg)
+    try:
+        balances = rpc.call(cfg, "getbalances", wallet=WALLET_NAME)
+        if isinstance(balances, dict) and isinstance(balances.get("mine"), dict):
+            mine = balances["mine"]
+            return {
+                "trusted": float(mine.get("trusted") or 0),
+                "untrusted_pending": float(mine.get("untrusted_pending") or 0),
+                "immature": float(mine.get("immature") or 0),
+            }
+    except RuntimeError:
+        pass
+    bal = float(rpc.call(cfg, "getbalance", ["*", 0, True], wallet=WALLET_NAME) or 0)
+    return {"trusted": bal, "untrusted_pending": 0.0, "immature": 0.0}
+
+
+def wallet_recent_transactions(
+    rpc: BitcoinRpcClient, rpc_cfg: dict[str, Any], *, count: int = 15
+) -> list[dict[str, Any]]:
+    ensure_mining_wallet(rpc, rpc_cfg)
+    cfg = wallet_rpc_cfg(rpc_cfg)
+    rows = rpc.call(cfg, "listtransactions", ["*", int(count), 0, True], wallet=WALLET_NAME) or []
+    out: list[dict[str, Any]] = []
+    if not isinstance(rows, list):
+        return out
+    for row in reversed(rows):
+        if not isinstance(row, dict):
+            continue
+        out.append(
+            {
+                "txid": str(row.get("txid") or ""),
+                "category": str(row.get("category") or ""),
+                "amount": float(row.get("amount") or 0),
+                "confirmations": int(row.get("confirmations") or 0),
+                "time": int(row.get("time") or row.get("timereceived") or 0),
+                "address": str(row.get("address") or ""),
+                "fee": float(row["fee"]) if row.get("fee") is not None else None,
+            }
+        )
+    return out
+
+
+def send_from_wallet(
+    rpc: BitcoinRpcClient,
+    rpc_cfg: dict[str, Any],
+    *,
+    address: str,
+    amount_btc: float,
+    subtract_fee_from_amount: bool = False,
+) -> str:
+    """Send BTC from the device wallet. Returns txid. Raises RuntimeError on failure."""
+    if amount_btc <= 0:
+        raise RuntimeError("Amount must be greater than zero")
+    if not validate_bitcoin_address(rpc, rpc_cfg, address):
+        raise RuntimeError("Destination address is not valid")
+    ensure_mining_wallet(rpc, rpc_cfg)
+    cfg = wallet_rpc_cfg(rpc_cfg)
+    # sendtoaddress btc_address amount comment comment_to subtractfeefromamount
+    txid = rpc.call(
+        cfg,
+        "sendtoaddress",
+        [address, amount_btc, "", "", bool(subtract_fee_from_amount)],
+        wallet=WALLET_NAME,
+    )
+    if not isinstance(txid, str) or not txid.strip():
+        raise RuntimeError("sendtoaddress did not return a transaction id")
+    return txid.strip()

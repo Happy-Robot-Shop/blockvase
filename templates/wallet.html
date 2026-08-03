@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Blockvase Wallet</title>
+    <link rel="icon" href="/media/logo_64.png" type="image/png" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="portal-page settings-page wallet-page" data-theme="{{ theme | default('default') }}">
+    <div class="portal-splash-overlay" id="portalSplashOverlay" aria-hidden="true"></div>
+    <div class="loading-overlay" id="loadingOverlay">
+      <div class="loading-spinner"></div>
+      <div class="loading-text" id="loadingText">Loading...</div>
+    </div>
+    <div class="container" id="mainContainer">
+      <header>
+        <div class="header-left">
+          <img class="logo" src="/media/logo_200.png" alt="Blockvase" />
+          <h1 id="deviceNameHeader">Wallet</h1>
+        </div>
+        <div class="header-right">
+          <a href="/" class="btn-icon settings-back-link" aria-label="Back to portal" title="Back to portal"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></a>
+        </div>
+      </header>
+
+      <div id="adminAuthSection" class="settings-card metric-board metric-board--dense" style="display:none;">
+        <h2 class="metric-board-title">Wallet Login</h2>
+        <p id="adminAuthHelp" class="muted-note">
+          Enter the admin username and password configured during setup.
+        </p>
+        <div id="adminAuthStatus" class="status info" style="display:none;"></div>
+        <form id="adminLoginForm" autocomplete="off">
+          <div id="adminLoginPasswordStep">
+            <label for="adminLoginUsername">Username</label>
+            <input id="adminLoginUsername" type="text" placeholder="admin" autocomplete="username" required />
+            <label for="adminLoginPassword">Password</label>
+            <input id="adminLoginPassword" type="password" placeholder="Password" autocomplete="current-password" data-password="true" required />
+            <button class="btn" type="submit" id="adminLoginSubmitBtn">Log In</button>
+          </div>
+          <div id="adminLoginTotpStep" style="display:none;">
+            <label for="adminLoginTotpCode">Authenticator code</label>
+            <input id="adminLoginTotpCode" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
+            <input type="hidden" id="adminLoginPendingToken" value="" />
+            <button class="btn" type="submit" id="adminLoginTotpBtn">Verify</button>
+            <button class="btn secondary btn-spaced" type="button" id="adminLoginTotpCancel">Back</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="settings-sections" id="walletSections" style="display:none;">
+        <div class="settings-card metric-board metric-board--dense">
+          <h2 class="metric-board-title">Balance</h2>
+          <p class="muted-note">Funds in this device’s Bitcoin Knots wallet (same wallet used for mining payouts).</p>
+          <div id="walletStatus" class="status info" style="display:none;"></div>
+          <div class="portal-kpi-strip portal-kpi-strip--in-board" aria-label="Wallet balance">
+            <div class="portal-kpi">
+              <span class="portal-kpi-label">Available</span>
+              <span class="portal-kpi-value portal-kpi-value--mono" id="walletBalTrusted">—</span>
+            </div>
+            <div class="portal-kpi">
+              <span class="portal-kpi-label">Unconfirmed</span>
+              <span class="portal-kpi-value portal-kpi-value--mono" id="walletBalPending">—</span>
+            </div>
+            <div class="portal-kpi">
+              <span class="portal-kpi-label">Immature</span>
+              <span class="portal-kpi-value portal-kpi-value--mono" id="walletBalImmature">—</span>
+            </div>
+          </div>
+          <p id="walletSyncNote" class="muted-note muted-note--compact btn-spaced" style="display:none;"></p>
+        </div>
+
+        <div class="settings-config-row">
+          <div class="settings-config-main">
+            <div class="settings-card metric-board metric-board--dense">
+              <h2 class="metric-board-title">Receive</h2>
+              <p class="muted-note">Share this address to receive bitcoin to the node on this device.</p>
+              <div id="walletReceiveStatus" class="status info" style="display:none;"></div>
+              <div class="wallet-receive-layout">
+                <img id="walletReceiveQr" class="wallet-receive-qr" alt="Receive address QR code" width="180" height="180" />
+                <div class="wallet-receive-details">
+                  <label for="walletReceiveAddress">Address</label>
+                  <input id="walletReceiveAddress" type="text" readonly spellcheck="false" class="portal-kpi-value--mono" />
+                  <div class="settings-actions-buttons settings-actions-buttons--pair btn-spaced" role="group">
+                    <button class="btn secondary" type="button" id="walletCopyAddressBtn">Copy address</button>
+                    <button class="btn secondary" type="button" id="walletNewAddressBtn">New address</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card metric-board metric-board--dense">
+              <h2 class="metric-board-title">Send</h2>
+              <p class="muted-note">Spend from this device’s wallet. Double-check the destination address.</p>
+              <div id="walletSendStatus" class="status info" style="display:none;"></div>
+              <form id="walletSendForm" autocomplete="off">
+                <label for="walletSendAddress">Destination address</label>
+                <input id="walletSendAddress" type="text" spellcheck="false" placeholder="bc1..." required />
+                <label for="walletSendAmount">Amount (BTC)</label>
+                <input id="walletSendAmount" type="text" inputmode="decimal" placeholder="0.00000000" required />
+                <label class="wallet-checkbox-row">
+                  <input type="checkbox" id="walletSubtractFee" />
+                  Subtract fee from amount
+                </label>
+                <button class="btn btn-spaced" type="submit">Send bitcoin</button>
+              </form>
+            </div>
+          </div>
+
+          <div class="settings-config-sidebar">
+            <div class="settings-card metric-board metric-board--dense">
+              <h2 class="metric-board-title">Recent activity</h2>
+              <div id="walletTxList" class="wallet-tx-list muted-note">Loading…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var el = document.getElementById("portalSplashOverlay") || document.querySelector(".portal-splash-overlay");
+        if (!el) return;
+        function finish() {
+          el.classList.add("portal-splash-overlay--gone");
+        }
+        function fadeOut() {
+          el.classList.add("portal-splash-overlay--hide");
+          el.addEventListener("transitionend", finish, { once: true });
+          setTimeout(finish, 600);
+        }
+        function schedule() {
+          setTimeout(fadeOut, 300);
+        }
+        if (document.readyState === "complete") schedule();
+        else window.addEventListener("load", schedule);
+      })();
+    </script>
+    <script src="/static/wallet.js"></script>
+  </body>
+</html>
