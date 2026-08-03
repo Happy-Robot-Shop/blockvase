@@ -15,9 +15,16 @@ mkdir -p /usr/lib/blockvase /etc/blockvase /var/lib/blockvase
 echo "${PROJECT_DIR}" >/etc/blockvase/project-dir
 chmod 644 /etc/blockvase/project-dir
 
-for s in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-miner-refresh-env.sh; do
-  install -o root -g root -m 755 "${PROJECT_DIR}/scripts/${s}" "/usr/lib/blockvase/${s}"
+for s in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-miner-refresh-env.sh verify-ota-update.sh; do
+  if [[ -f "${PROJECT_DIR}/scripts/${s}" ]]; then
+    install -o root -g root -m 755 "${PROJECT_DIR}/scripts/${s}" "/usr/lib/blockvase/${s}"
+  fi
 done
+chmod +x "${PROJECT_DIR}/scripts/verify-ota-update.sh" 2>/dev/null || true
+# Drop blanket sudo from %sudo; keep NOPASSWD appliance rules below.
+if id -nG "${SERVICE_USER}" 2>/dev/null | tr ' ' '\n' | grep -qx sudo; then
+  gpasswd -d "${SERVICE_USER}" sudo 2>/dev/null || true
+fi
 
 cat >/etc/sudoers.d/blockvase-ap <<EOF
 ${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/ap-mode.sh

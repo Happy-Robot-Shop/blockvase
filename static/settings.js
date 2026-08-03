@@ -114,9 +114,61 @@ async function requireSettingsAccess() {
   }
 }
 
+function showAdminLoginPasswordStep() {
+  const pwStep = document.getElementById("adminLoginPasswordStep");
+  const totpStep = document.getElementById("adminLoginTotpStep");
+  if (pwStep) pwStep.style.display = "";
+  if (totpStep) totpStep.style.display = "none";
+  const pending = document.getElementById("adminLoginPendingToken");
+  if (pending) pending.value = "";
+}
+
+function showAdminLoginTotpStep(pendingToken) {
+  const pwStep = document.getElementById("adminLoginPasswordStep");
+  const totpStep = document.getElementById("adminLoginTotpStep");
+  if (pwStep) pwStep.style.display = "none";
+  if (totpStep) totpStep.style.display = "block";
+  const pending = document.getElementById("adminLoginPendingToken");
+  if (pending) pending.value = pendingToken || "";
+  const code = document.getElementById("adminLoginTotp");
+  if (code) {
+    code.value = "";
+    code.focus();
+  }
+}
+
 function loginAdmin(e) {
   e.preventDefault();
   const statusDiv = document.getElementById("adminAuthStatus");
+  const totpStep = document.getElementById("adminLoginTotpStep");
+  const inTotp = totpStep && totpStep.style.display !== "none";
+  if (inTotp) {
+    const pending = document.getElementById("adminLoginPendingToken")?.value || "";
+    const code = document.getElementById("adminLoginTotp")?.value || "";
+    showStatus(statusDiv, "info", "Verifying code...");
+    fetch("/api/admin-auth/login/2fa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pending_token: pending, code }),
+    })
+      .then(r => parseJsonResponse(r).then(d => ({ ok: r.ok, d })))
+      .then(({ ok, d }) => {
+        if (d.pending_token) {
+          const pendingEl = document.getElementById("adminLoginPendingToken");
+          if (pendingEl) pendingEl.value = d.pending_token;
+        }
+        if (!ok || !d.success) {
+          showStatus(statusDiv, "error", d.error || "Invalid code");
+          return;
+        }
+        showAdminLoginPasswordStep();
+        setSettingsVisible(true);
+        startSettingsPage();
+      })
+      .catch(err => showStatus(statusDiv, "error", "Error: " + err.message));
+    return;
+  }
+
   const username = document.getElementById("adminLoginUsername").value.trim();
   const passwordInput = document.getElementById("adminLoginPassword");
   const password = passwordInput.value;
@@ -133,6 +185,11 @@ function loginAdmin(e) {
         showStatus(statusDiv, "error", d.error || "Login failed");
         return;
       }
+      if (d.needs_2fa && d.pending_token) {
+        showStatus(statusDiv, "info", d.message || "Enter authenticator code");
+        showAdminLoginTotpStep(d.pending_token);
+        return;
+      }
       setSettingsVisible(true);
       startSettingsPage();
     })
@@ -140,6 +197,97 @@ function loginAdmin(e) {
       passwordInput.value = "";
       showStatus(statusDiv, "error", "Error: " + err.message);
     });
+}
+
+function refreshTotpUi() {
+  const stateLabel = document.getElementById("totpStateLabel");
+  const beginBtn = document.getElementById("totpBeginBtn");
+  const disableBtn = document.getElementById("totpDisableBtn");
+  const enroll = document.getElementById("totpEnrollPanel");
+  const disablePanel = document.getElementById("totpDisablePanel");
+  fetch(withToken("/api/admin-auth/status"))
+    .then(r => r.json())
+    .then(d => {
+      const on = !!d.totp_enabled;
+      if (stateLabel) stateLabel.textContent = on ? "Status: enabled" : "Status: off";
+      if (beginBtn) beginBtn.style.display = on ? "none" : "";
+      if (disableBtn) disableBtn.style.display = on ? "" : "none";
+      if (enroll && on) enroll.style.display = "none";
+      if (disablePanel && !on) disablePanel.style.display = "none";
+    })
+    .catch(() => {
+      if (stateLabel) stateLabel.textContent = "Status: unavailable";
+    });
+}
+
+function beginTotpSetup() {
+  const statusDiv = document.getElementById("totpStatus");
+  showStatus(statusDiv, "info", "Starting 2FA setup...");
+  fetch(withToken("/api/admin-auth/2fa/begin"), { method: "POST" })
+    .then(r => parseJsonResponse(r).then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.success) {
+        showStatus(statusDiv, "error", d.error || "Could not start 2FA setup");
+        return;
+      }
+      const enroll = document.getElementById("totpEnrollPanel");
+      const qrWrap = document.getElementById("totpQrWrap");
+      const secretEl = document.getElementById("totpManualSecret");
+      if (qrWrap) qrWrap.innerHTML = d.qr_svg || "";
+      if (secretEl) secretEl.textContent = d.secret || "";
+      if (enroll) enroll.style.display = "block";
+      showStatus(statusDiv, "success", d.message || "Scan the QR, then confirm a code.");
+    })
+    .catch(err => showStatus(statusDiv, "error", "Error: " + err.message));
+}
+
+function confirmTotpSetup() {
+  const statusDiv = document.getElementById("totpStatus");
+  const code = document.getElementById("totpConfirmCode")?.value || "";
+  showStatus(statusDiv, "info", "Confirming...");
+  fetch(withToken("/api/admin-auth/2fa/confirm"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  })
+    .then(r => parseJsonResponse(r).then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.success) {
+        showStatus(statusDiv, "error", d.error || "Could not enable 2FA");
+        return;
+      }
+      const enroll = document.getElementById("totpEnrollPanel");
+      if (enroll) enroll.style.display = "none";
+      showStatus(statusDiv, "success", d.message || "2FA enabled");
+      refreshTotpUi();
+    })
+    .catch(err => showStatus(statusDiv, "error", "Error: " + err.message));
+}
+
+function disableTotp() {
+  const statusDiv = document.getElementById("totpStatus");
+  const password = document.getElementById("totpDisablePassword")?.value || "";
+  const code = document.getElementById("totpDisableCode")?.value || "";
+  showStatus(statusDiv, "info", "Disabling 2FA...");
+  fetch(withToken("/api/admin-auth/2fa/disable"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password, code }),
+  })
+    .then(r => parseJsonResponse(r).then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.success) {
+        showStatus(statusDiv, "error", d.error || "Could not disable 2FA");
+        return;
+      }
+      const pw = document.getElementById("totpDisablePassword");
+      const c = document.getElementById("totpDisableCode");
+      if (pw) pw.value = "";
+      if (c) c.value = "";
+      showStatus(statusDiv, "success", d.message || "2FA disabled");
+      refreshTotpUi();
+    })
+    .catch(err => showStatus(statusDiv, "error", "Error: " + err.message));
 }
 
 function syncSettingsLayoutMode() {
@@ -707,8 +855,20 @@ document.getElementById("setupForm")?.addEventListener("submit", saveAll);
 document.getElementById("wifiRpcForm")?.addEventListener("submit", saveAll);
 document.getElementById("deviceNameForm")?.addEventListener("submit", saveDeviceName);
 document.getElementById("adminLoginForm")?.addEventListener("submit", loginAdmin);
+document.getElementById("adminLoginTotpCancel")?.addEventListener("click", () => {
+  showAdminLoginPasswordStep();
+  const statusDiv = document.getElementById("adminAuthStatus");
+  if (statusDiv) statusDiv.style.display = "none";
+});
 document.getElementById("miningPayoutForm")?.addEventListener("submit", saveMiningPayout);
 document.getElementById("saveThemeBtn")?.addEventListener("click", saveTheme);
+document.getElementById("totpBeginBtn")?.addEventListener("click", beginTotpSetup);
+document.getElementById("totpConfirmBtn")?.addEventListener("click", confirmTotpSetup);
+document.getElementById("totpDisableBtn")?.addEventListener("click", () => {
+  const panel = document.getElementById("totpDisablePanel");
+  if (panel) panel.style.display = panel.style.display === "none" || !panel.style.display ? "block" : "none";
+});
+document.getElementById("totpDisableConfirmBtn")?.addEventListener("click", disableTotp);
 
 let statsInterval = null;
 let settingsStarted = false;
@@ -724,6 +884,7 @@ async function startSettingsPage() {
   loadTheme();
   loadAdminCredentials();
   loadMiningPayout();
+  refreshTotpUi();
   refreshUpdateAvailability(true);
   if (!statsInterval) statsInterval = setInterval(refreshStats, 5000);
   if (!updateCheckInterval) {

@@ -1,0 +1,3 @@
+# SSH commit signing keys trusted for device OTA (git verify-commit).
+# Format: allowedSignersFile — see gpg.ssh.allowedSignersFile in git-config(1).
+* namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHz0aXXuiC9hjUBuusikx5rmVpQEpDx3HmEkm71eOUmj

@@ -238,14 +238,20 @@ rm -f "${TMP_BACKEND}" "${TMP_KIOSK}" "${TMP_AP}" "${TMP_CHAIN_GUARD}" "${TMP_WI
 ${SUDO} mkdir -p /usr/lib/blockvase /etc/blockvase
 echo "${PROJECT_DIR}" | ${SUDO} tee /etc/blockvase/project-dir >/dev/null
 ${SUDO} chmod 644 /etc/blockvase/project-dir
-for _bv_script in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-miner-refresh-env.sh; do
+for _bv_script in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-miner-refresh-env.sh verify-ota-update.sh; do
   if [[ -f "${PROJECT_DIR}/scripts/${_bv_script}" ]]; then
     ${SUDO} install -o root -g root -m 755 "${PROJECT_DIR}/scripts/${_bv_script}" "/usr/lib/blockvase/${_bv_script}"
   fi
 done
+${SUDO} chmod +x "${PROJECT_DIR}/scripts/verify-ota-update.sh" 2>/dev/null || true
 # Portal/group needs read access to bitcoin.conf for RPC (password not mirrored into config.json).
 if getent group bitcoin >/dev/null 2>&1; then
   ${SUDO} usermod -aG bitcoin "${SERVICE_USER}" 2>/dev/null || true
+fi
+# Drop blanket sudo (ALL:ALL) from %sudo membership; appliance actions use NOPASSWD rules below.
+if id -nG "${SERVICE_USER}" 2>/dev/null | tr ' ' '\n' | grep -qx sudo; then
+  echo "       → Removing ${SERVICE_USER} from sudo group (NOPASSWD appliance scripts remain)."
+  ${SUDO} gpasswd -d "${SERVICE_USER}" sudo 2>/dev/null || true
 fi
 
 if [[ ! -f "${PROJECT_DIR}/systemd/blockvase-chain-guard.service" ]] || [[ ! -f "${PROJECT_DIR}/systemd/blockvase-chain-guard.timer" ]]; then

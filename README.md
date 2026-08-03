@@ -389,7 +389,9 @@ sudo systemctl status blockvase-ap bitcoind blockvase blockvase-kiosk
 | Clone / expand | `scripts/clone-safety.sh` (from `ap-mode ensure` and once from bootstrap) |
 | Port | `80` by default (`BLOCKVASE_PORT`) |
 | System actions | `/api/reboot`, `/api/factory-reset`, `/api/device-update` need admin session **and** `ENABLE_SYSTEM_ACTIONS=true` |
-| Device update | Settings → **Update device** runs `scripts/device-update.sh` (`git pull` + `bootstrap.sh`); kiosk + portal show a full-screen updating overlay (same idea as the setup QR / loading screens). A background check (~every 30m, `BLOCKVASE_UPDATE_CHECK_SEC`) compares `HEAD` to `origin/<branch>` and highlights the button when commits are available. |
+| Device update | Settings → **Update device** runs `scripts/device-update.sh` (verify pinned `origin` + **SSH-signed tip**, then `git pull --ff-only` + `bootstrap.sh`). Trusted keys live in `security/ota-allowed-signers`. Kiosk + portal show a full-screen updating overlay. A background check (~every 30m) highlights the button when commits are available. |
+| Admin 2FA | Settings → Admin login → **Two-factor authentication** (optional TOTP). When enabled, login is password then authenticator code. |
+| Privileges | The `blockvase` login user is **not** in the `sudo` group. Appliance actions use narrow NOPASSWD rules under `/usr/lib/blockvase/`. For shell maintenance, use root or temporarily re-add the user to `sudo`. |
 
 **Fee tiers** (`/api/blockchain-info`): external APIs → local mempool → `estimatesmartfee`. Response field `fee_source` is `external`, `local_mempool`, or `node`.
 

@@ -37,6 +37,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "session_token": "",
     "admin_username": "",
     "admin_password_hash": "",
+    # TOTP 2FA: sealed secret + enabled flag. pending_secret used only during enroll.
+    "totp_enabled": False,
+    "totp_secret_enc": "",
+    "totp_pending_secret_enc": "",
     "mining_payout_address": "",
     "rpc": {
         "host": "127.0.0.1",
@@ -152,6 +156,14 @@ def _unseal_secret(blob: str) -> str:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
         return ""
+
+
+def seal_secret(plaintext: str) -> str:
+    return _seal_secret(plaintext)
+
+
+def unseal_secret(blob: str) -> str:
+    return _unseal_secret(blob)
 
 
 def _ensure_dirs() -> None:

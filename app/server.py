@@ -29,9 +29,12 @@ from .config import (
     generate_ap_password,
     load_config,
     save_config,
+    seal_secret,
+    unseal_secret,
 )
 from .mining_metrics import fetch_mining_metrics
 from .state import StateManager
+from .totp import generate_secret, otpauth_uri, verify_totp
 
 
 app = Flask(__name__, template_folder="../templates", static_folder="../static")
@@ -71,6 +74,10 @@ _update_availability: dict[str, Any] = {
     "checked_at": None,
     "check_error": None,
 }
+# Short-lived password-OK tokens waiting for TOTP (in-memory only).
+_pending_2fa_lock = threading.Lock()
+_pending_2fa: dict[str, dict[str, Any]] = {}
+_PENDING_2FA_TTL_SEC = 5 * 60
 
 
 def _request_origin_host() -> str | None:
@@ -463,6 +470,42 @@ def _issue_session_token(cfg: dict[str, Any]) -> str:
     return token
 
 
+def _totp_enabled(cfg: dict[str, Any]) -> bool:
+    return bool(cfg.get("totp_enabled")) and bool(unseal_secret(str(cfg.get("totp_secret_enc", "") or "")))
+
+
+def _totp_secret(cfg: dict[str, Any]) -> str:
+    return unseal_secret(str(cfg.get("totp_secret_enc", "") or ""))
+
+
+def _purge_pending_2fa() -> None:
+    now = time.time()
+    with _pending_2fa_lock:
+        dead = [k for k, v in _pending_2fa.items() if float(v.get("exp", 0)) < now]
+        for k in dead:
+            _pending_2fa.pop(k, None)
+
+
+def _create_pending_2fa(username: str) -> str:
+    _purge_pending_2fa()
+    token = secrets.token_urlsafe(24)
+    with _pending_2fa_lock:
+        _pending_2fa[token] = {
+            "username": username,
+            "exp": time.time() + _PENDING_2FA_TTL_SEC,
+        }
+    return token
+
+
+def _consume_pending_2fa(token: str) -> str | None:
+    _purge_pending_2fa()
+    with _pending_2fa_lock:
+        entry = _pending_2fa.pop(str(token or ""), None)
+    if not entry:
+        return None
+    return str(entry.get("username") or "")
+
+
 def _save_admin_credentials(cfg: dict[str, Any], username: str, password: str) -> str:
     username = username.strip()
     err = _validate_admin_credentials(username, password)
@@ -601,6 +644,7 @@ def admin_auth_status():
             "authenticated": authenticated,
             "credentials_configured": _has_admin_credentials(cfg),
             "username": str(cfg.get("admin_username", "") or "") if authenticated else "",
+            "totp_enabled": _totp_enabled(cfg),
         }
     )
 
@@ -613,6 +657,43 @@ def admin_auth_login():
     password = str(body.get("password", ""))
     if not _is_admin_password_valid(cfg, username, password):
         return _json_err("Invalid username or password", 403)
+    if _totp_enabled(cfg):
+        pending = _create_pending_2fa(username)
+        return _json_ok(
+            needs_2fa=True,
+            pending_token=pending,
+            message="Enter the 6-digit code from your authenticator app.",
+        )
+    _issue_session_token(cfg)
+    save_config(cfg)
+    response = _json_ok(needs_2fa=False, message="Authenticated")
+    return _set_admin_cookie(response, cfg)
+
+
+@app.post("/api/admin-auth/login/2fa")
+def admin_auth_login_2fa():
+    body = request.get_json(force=True, silent=True) or {}
+    cfg = load_config()
+    if not _totp_enabled(cfg):
+        return _json_err("Two-factor authentication is not enabled", 400)
+    pending = str(body.get("pending_token", "") or "")
+    code = str(body.get("code", "") or "")
+    username = _consume_pending_2fa(pending)
+    if not username:
+        return _json_err("Login challenge expired. Sign in again.", 403)
+    if username != str(cfg.get("admin_username", "") or ""):
+        return _json_err("Invalid two-factor code", 403)
+    if not verify_totp(_totp_secret(cfg), code):
+        # Re-issue pending so a mistyped code does not force full re-login immediately.
+        new_pending = _create_pending_2fa(username)
+        return jsonify(
+            {
+                "success": False,
+                "error": "Invalid two-factor code",
+                "needs_2fa": True,
+                "pending_token": new_pending,
+            }
+        ), 403
     _issue_session_token(cfg)
     save_config(cfg)
     response = _json_ok(message="Authenticated")
@@ -634,6 +715,79 @@ def admin_auth_credentials():
     save_config(cfg)
     response = _json_ok(username=username, message="Admin credentials saved")
     return _set_admin_cookie(response, cfg)
+
+
+@app.post("/api/admin-auth/2fa/begin")
+def admin_auth_2fa_begin():
+    cfg = load_config()
+    token_err = _require_admin_token(cfg)
+    if token_err:
+        return token_err
+    if not _has_admin_credentials(cfg):
+        return _json_err("Set an admin username and password before enabling 2FA.")
+    if _totp_enabled(cfg):
+        return _json_err("Two-factor authentication is already enabled. Disable it first to re-enroll.")
+    secret = generate_secret()
+    cfg["totp_pending_secret_enc"] = seal_secret(secret)
+    save_config(cfg)
+    account = str(cfg.get("admin_username", "") or "admin")
+    device = str(cfg.get("device_name", "") or "blockvase")
+    uri = otpauth_uri(secret, account_name=f"{account}@{device}", issuer="Blockvase")
+    img = qrcode.make(uri, image_factory=SvgImage)
+    stream = BytesIO()
+    img.save(stream)
+    return _json_ok(
+        secret=secret,
+        otpauth_url=uri,
+        qr_svg=stream.getvalue().decode("utf-8"),
+        message="Scan the QR with your authenticator app, then confirm with a code.",
+    )
+
+
+@app.post("/api/admin-auth/2fa/confirm")
+def admin_auth_2fa_confirm():
+    body = request.get_json(force=True, silent=True) or {}
+    cfg = load_config()
+    token_err = _require_admin_token(cfg, body)
+    if token_err:
+        return token_err
+    pending = unseal_secret(str(cfg.get("totp_pending_secret_enc", "") or ""))
+    if not pending:
+        return _json_err("No 2FA enrollment in progress. Start setup again.")
+    code = str(body.get("code", "") or "")
+    if not verify_totp(pending, code):
+        return _json_err("Invalid authenticator code. Check the time on your phone and try again.")
+    cfg["totp_secret_enc"] = seal_secret(pending)
+    cfg["totp_pending_secret_enc"] = ""
+    cfg["totp_enabled"] = True
+    # Force re-login with 2FA on other sessions.
+    _issue_session_token(cfg)
+    save_config(cfg)
+    response = _json_ok(totp_enabled=True, message="Two-factor authentication enabled.")
+    return _set_admin_cookie(response, cfg)
+
+
+@app.post("/api/admin-auth/2fa/disable")
+def admin_auth_2fa_disable():
+    body = request.get_json(force=True, silent=True) or {}
+    cfg = load_config()
+    token_err = _require_admin_token(cfg, body)
+    if token_err:
+        return token_err
+    if not _totp_enabled(cfg):
+        return _json_ok(totp_enabled=False, message="Two-factor authentication is already off.")
+    password = str(body.get("password", "") or "")
+    code = str(body.get("code", "") or "")
+    username = str(cfg.get("admin_username", "") or "")
+    if not _is_admin_password_valid(cfg, username, password):
+        return _json_err("Admin password is incorrect", 403)
+    if not verify_totp(_totp_secret(cfg), code):
+        return _json_err("Invalid authenticator code", 403)
+    cfg["totp_enabled"] = False
+    cfg["totp_secret_enc"] = ""
+    cfg["totp_pending_secret_enc"] = ""
+    save_config(cfg)
+    return _json_ok(totp_enabled=False, message="Two-factor authentication disabled.")
 
 
 @app.get("/display")
@@ -1163,6 +1317,9 @@ def factory_reset():
     cfg["setup_token"] = ""
     cfg["session_token"] = ""
     cfg["ap_password"] = ""
+    cfg["totp_enabled"] = False
+    cfg["totp_secret_enc"] = ""
+    cfg["totp_pending_secret_enc"] = ""
     cfg["mining_payout_address"] = ""
     cfg["rpc"] = json.loads(json.dumps(DEFAULT_CONFIG["rpc"]))
     cfg["rpc"].update(preserved_rpc)

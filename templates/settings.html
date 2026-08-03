@@ -37,11 +37,20 @@
         </p>
         <div id="adminAuthStatus" class="status info" style="display:none;"></div>
         <form id="adminLoginForm" autocomplete="off">
-          <label for="adminLoginUsername">Username</label>
-          <input id="adminLoginUsername" type="text" placeholder="admin" autocomplete="username" required />
-          <label for="adminLoginPassword">Password</label>
-          <input id="adminLoginPassword" type="password" placeholder="Password" autocomplete="current-password" data-password="true" required />
-          <button class="btn" type="submit">Log In</button>
+          <div id="adminLoginPasswordStep">
+            <label for="adminLoginUsername">Username</label>
+            <input id="adminLoginUsername" type="text" placeholder="admin" autocomplete="username" required />
+            <label for="adminLoginPassword">Password</label>
+            <input id="adminLoginPassword" type="password" placeholder="Password" autocomplete="current-password" data-password="true" required />
+            <button class="btn" type="submit" id="adminLoginSubmitBtn">Log In</button>
+          </div>
+          <div id="adminLoginTotpStep" style="display:none;">
+            <label for="adminLoginTotp">Authenticator code</label>
+            <input id="adminLoginTotp" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
+            <input type="hidden" id="adminLoginPendingToken" value="" />
+            <button class="btn" type="submit" id="adminLoginTotpBtn">Verify</button>
+            <button class="btn secondary btn-spaced" type="button" id="adminLoginTotpCancel">Back</button>
+          </div>
         </form>
       </div>
 
@@ -126,6 +135,31 @@
                 <label for="adminPasswordConfirm">Confirm password</label>
                 <input id="adminPasswordConfirm" type="password" placeholder="Match new password" autocomplete="new-password" data-password="true" />
               </div>
+            </div>
+            <div class="metric-cluster-divider" aria-hidden="true"></div>
+            <h4 class="metric-cluster-title">Two-factor authentication</h4>
+            <p class="muted-note muted-note--compact network-subpanel-help" id="totpHelp">
+              Optional authenticator-app codes (Google Authenticator, Aegis, etc.) for Settings login.
+            </p>
+            <div id="totpStatus" class="status info" style="display:none;"></div>
+            <p class="muted-note muted-note--compact" id="totpStateLabel">Status: checking…</p>
+            <div id="totpEnrollPanel" style="display:none;">
+              <div id="totpQrWrap" class="btn-spaced" style="max-width:220px;"></div>
+              <p class="muted-note muted-note--compact">Or enter this key manually: <code id="totpManualSecret"></code></p>
+              <label for="totpConfirmCode">Confirm code</label>
+              <input id="totpConfirmCode" type="text" inputmode="numeric" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
+              <button class="btn secondary btn-spaced" type="button" id="totpConfirmBtn">Confirm &amp; enable 2FA</button>
+            </div>
+            <div class="network-form-actions" style="justify-content:flex-start; gap:8px;">
+              <button class="btn secondary" type="button" id="totpBeginBtn">Set up 2FA</button>
+              <button class="btn secondary" type="button" id="totpDisableBtn" style="display:none;">Disable 2FA</button>
+            </div>
+            <div id="totpDisablePanel" style="display:none;" class="btn-spaced">
+              <label for="totpDisablePassword">Admin password</label>
+              <input id="totpDisablePassword" type="password" autocomplete="current-password" data-password="true" />
+              <label for="totpDisableCode">Authenticator code</label>
+              <input id="totpDisableCode" type="text" inputmode="numeric" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
+              <button class="btn secondary btn-spaced" type="button" id="totpDisableConfirmBtn">Confirm disable</button>
             </div>
           </div>
 
