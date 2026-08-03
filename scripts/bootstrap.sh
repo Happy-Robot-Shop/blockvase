@@ -77,6 +77,8 @@ ${SUDO} apt-get install -y \
   cloud-guest-utils \
   e2fsprogs \
   gdisk \
+  nginx \
+  openssl \
   python3 \
   python3-venv \
   python3-pip \
@@ -175,7 +177,7 @@ chmod +x "${PROJECT_DIR}/scripts/kiosk-session.sh"
 [[ -f "${PROJECT_DIR}/scripts/chain-guard.sh" ]] && chmod +x "${PROJECT_DIR}/scripts/chain-guard.sh"
 [[ -f "${PROJECT_DIR}/scripts/check-asic.sh" ]] && chmod +x "${PROJECT_DIR}/scripts/check-asic.sh"
 
-echo "[5/8] Port 80 bind via systemd AmbientCapabilities (not setcap on system Python)..."
+echo "[5/8] Portal binds loopback :8080; nginx terminates :80/:443 (drop legacy setcap)..."
 # Drop any prior setcap on the venv/real Python binary from older bootstraps.
 PYTHON_BIN="${PROJECT_DIR}/.venv/bin/python3"
 if [[ -f "${PYTHON_BIN}" ]]; then
@@ -238,11 +240,17 @@ rm -f "${TMP_BACKEND}" "${TMP_KIOSK}" "${TMP_AP}" "${TMP_CHAIN_GUARD}" "${TMP_WI
 ${SUDO} mkdir -p /usr/lib/blockvase /etc/blockvase
 echo "${PROJECT_DIR}" | ${SUDO} tee /etc/blockvase/project-dir >/dev/null
 ${SUDO} chmod 644 /etc/blockvase/project-dir
-for _bv_script in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-miner-refresh-env.sh verify-ota-update.sh; do
+for _bv_script in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-miner-refresh-env.sh verify-ota-update.sh ensure-portal-tls.sh; do
   if [[ -f "${PROJECT_DIR}/scripts/${_bv_script}" ]]; then
     ${SUDO} install -o root -g root -m 755 "${PROJECT_DIR}/scripts/${_bv_script}" "/usr/lib/blockvase/${_bv_script}"
   fi
 done
+${SUDO} chmod +x "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" 2>/dev/null || true
+# Issue cert + write nginx site now; reload nginx after Waitress is on :8080 (below).
+if [[ -x "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" ]]; then
+  echo "       → Ensuring portal TLS certificate (nginx reload deferred)..."
+  ${SUDO} "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" --skip-nginx-reload || true
+fi
 # Root-owned OTA allowlists (device-update must not trust user-writable copies alone).
 if [[ -f "${PROJECT_DIR}/security/ota-allowed-remotes.txt" ]]; then
   ${SUDO} install -o root -g root -m 644 \
@@ -357,23 +365,33 @@ echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/ap-mode.sh" | ${SUD
 echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/set-mining-payout.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-mining-payout >/dev/null
 echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/blockvase-miner-refresh-env.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-miner-env >/dev/null
 echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/device-update.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-device-update >/dev/null
+echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/ensure-portal-tls.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-portal-tls >/dev/null
 echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop blockvase-miner.service, /usr/bin/systemctl start blockvase-miner.service, /usr/bin/systemctl restart blockvase-miner.service" | ${SUDO} tee /etc/sudoers.d/blockvase-check-asic >/dev/null
 {
   echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/sbin/reboot"
   echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/reboot"
   echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/hostnamectl"
 } | ${SUDO} tee /etc/sudoers.d/blockvase-reboot >/dev/null
-${SUDO} chmod 440 /etc/sudoers.d/blockvase-ap /etc/sudoers.d/blockvase-mining-payout /etc/sudoers.d/blockvase-miner-env /etc/sudoers.d/blockvase-device-update /etc/sudoers.d/blockvase-check-asic /etc/sudoers.d/blockvase-reboot
+${SUDO} chmod 440 /etc/sudoers.d/blockvase-ap /etc/sudoers.d/blockvase-mining-payout /etc/sudoers.d/blockvase-miner-env /etc/sudoers.d/blockvase-device-update /etc/sudoers.d/blockvase-portal-tls /etc/sudoers.d/blockvase-check-asic /etc/sudoers.d/blockvase-reboot
 # Drop obsolete sudoers (repo-path scripts / unrestricted hostnamectl / port-redirect).
 ${SUDO} rm -f /etc/sudoers.d/blockvase-port-redirect
 if ${SUDO} command -v ufw >/dev/null 2>&1 && ${SUDO} ufw status | grep -q "Status: active"; then
   ${SUDO} ufw allow in on wlan0 proto udp to any port 67 || true
   ${SUDO} ufw allow in on wlan0 proto udp to any port 68 || true
   ${SUDO} ufw allow in on wlan0 proto tcp to any port 80 || true
+  ${SUDO} ufw allow in on wlan0 proto tcp to any port 443 || true
 fi
 ${SUDO} systemctl enable --now avahi-daemon.service 2>/dev/null || true
 ${SUDO} systemctl enable --now blockvase-ap.service
 ${SUDO} systemctl enable --now blockvase.service
+# nginx after portal so :80 is free (Waitress is loopback :8080).
+if [[ -x /usr/lib/blockvase/ensure-portal-tls.sh ]]; then
+  ${SUDO} /usr/lib/blockvase/ensure-portal-tls.sh || true
+elif [[ -x "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" ]]; then
+  ${SUDO} "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" || true
+fi
+${SUDO} systemctl enable --now nginx.service 2>/dev/null || true
+${SUDO} systemctl restart nginx.service 2>/dev/null || true
 if [[ -f "${PROJECT_DIR}/systemd/blockvase-chain-guard.timer" ]]; then
   ${SUDO} systemctl enable --now blockvase-chain-guard.timer
   ${SUDO} systemctl start blockvase-chain-guard.service 2>/dev/null || true

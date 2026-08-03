@@ -25,6 +25,8 @@
         </div>
       </header>
 
+      <div id="portalTlsCard" class="metric-board metric-board--dense portal-tls-card" hidden style="display:none;" role="region" aria-label="Portal certificate"></div>
+
       <div id="adminAuthSection" class="settings-card metric-board metric-board--dense" style="display:none;">
         <h2 class="metric-board-title">Wallet Login</h2>
         <p id="adminAuthHelp" class="muted-note">
@@ -174,6 +176,8 @@
         else window.addEventListener("load", schedule);
       })();
     </script>
+    <script src="/static/tls-install-guide.js"></script>
+    <script src="/static/portal-tls.js"></script>
     <script src="/static/wallet.js"></script>
   </body>
 </html>

@@ -74,6 +74,18 @@
           <input id="setupPassword" type="password" placeholder="Password" autocomplete="off" data-password="true" />
           <button class="btn" type="submit">Save & Reboot</button>
         </form>
+        <div class="metric-cluster-divider" aria-hidden="true"></div>
+        <div id="setupTlsCard" class="metric-cluster" style="display:none;">
+          <h4 class="metric-cluster-title">Portal certificate (optional)</h4>
+          <p class="muted-note muted-note--compact">
+            After Wi‑Fi setup, download this device’s <strong>CA</strong> certificate, follow the steps for your phone or computer,
+            then open <span id="setupTlsHostHint">https://your-device.local</span>. This is a private device CA (not a public internet CA).
+          </p>
+          <div id="setupTlsStatus" class="status info" style="display:none;"></div>
+          <p class="muted-note muted-note--compact" id="setupTlsFingerprint"></p>
+          <a class="btn secondary btn-spaced" href="/api/tls/cert.crt" id="setupTlsDownloadBtn">Download CA certificate</a>
+          <div id="setupTlsGuide" data-tls-install-guide></div>
+        </div>
       </div>
 
       <div class="settings-config-row">
@@ -168,6 +180,43 @@
               <label for="totpDisableCode">Authenticator code</label>
               <input id="totpDisableCode" type="text" inputmode="numeric" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
               <button class="btn secondary btn-spaced" type="button" id="totpDisableConfirmBtn">Confirm disable</button>
+            </div>
+            <div class="metric-cluster-divider" aria-hidden="true"></div>
+            <h4 class="metric-cluster-title">Portal HTTPS certificate</h4>
+            <p class="muted-note muted-note--compact network-subpanel-help">
+              HTTP stays available by default. Download the device <strong>CA</strong>, follow the install steps for your platform,
+              then open <code>https://…local</code> without warnings. Prefer HTTPS redirect only after every client you use has trusted this CA.
+            </p>
+            <div id="tlsPanelStatus" class="status info" style="display:none;"></div>
+            <p class="muted-note muted-note--compact" id="tlsStateLabel">Status: checking…</p>
+            <p class="muted-note muted-note--compact portal-kpi-value--mono" id="tlsFingerprint"></p>
+            <p class="muted-note muted-note--compact" id="tlsSans"></p>
+            <div class="network-form-actions" style="justify-content:flex-start; gap:8px; flex-wrap:wrap;">
+              <a class="btn secondary" href="/api/tls/cert.crt" id="tlsDownloadBtn">Download CA certificate</a>
+              <a class="btn secondary" href="#" id="tlsOpenHttpsBtn" target="_blank" rel="noopener">Open HTTPS portal</a>
+            </div>
+            <div id="tlsSettingsGuide" data-tls-install-guide></div>
+            <label class="btn-spaced" style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="tlsHttpsRedirect" />
+              <span>Prefer HTTPS (redirect HTTP → HTTPS)</span>
+            </label>
+            <div class="network-field-grid network-field-grid--pairs btn-spaced">
+              <div>
+                <label for="tlsStepUpUsername">Admin username</label>
+                <input id="tlsStepUpUsername" type="text" autocomplete="username" />
+              </div>
+              <div>
+                <label for="tlsStepUpPassword">Admin password</label>
+                <input id="tlsStepUpPassword" type="password" autocomplete="current-password" data-password="true" />
+              </div>
+              <div id="tlsStepUpTotpWrap" style="display:none;">
+                <label for="tlsStepUpTotp">Authenticator code</label>
+                <input id="tlsStepUpTotp" type="text" inputmode="numeric" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
+              </div>
+            </div>
+            <div class="network-form-actions" style="justify-content:flex-start; gap:8px; flex-wrap:wrap;">
+              <button class="btn secondary" type="button" id="tlsSaveRedirectBtn">Save HTTPS preference</button>
+              <button class="btn secondary" type="button" id="tlsRegenerateBtn">Regenerate certificate</button>
             </div>
           </div>
 
@@ -348,6 +397,8 @@
       })();
     </script>
     <script src="/static/device-update.js"></script>
+    <script src="/static/tls-install-guide.js"></script>
+    <script src="/static/portal-tls.js"></script>
     <script src="/static/settings.js"></script>
   </body>
 </html>

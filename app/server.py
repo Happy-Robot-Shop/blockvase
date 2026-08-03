@@ -51,6 +51,7 @@ from .mining_wallet import (
     validate_bitcoin_address,
 )
 from .state import StateManager
+from .tls_cert import read_cert_pem, tls_status
 from .totp import generate_secret, otpauth_uri, verify_totp
 
 
@@ -141,6 +142,16 @@ def _request_origin_host() -> str | None:
     return None
 
 
+def _https_redirect_exempt(path: str) -> bool:
+    """Paths that must stay reachable over HTTP when prefer-HTTPS is on (cert recovery)."""
+    if path.startswith("/api/tls") or path.startswith("/api/admin-auth"):
+        return True
+    # Settings/setup over HTTP so users can turn redirect off if a client has not trusted the cert.
+    if path in {"/settings", "/setup"} or path.startswith("/static/") or path.startswith("/media/"):
+        return True
+    return False
+
+
 @app.before_request
 def _start_request_timer():
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
@@ -149,6 +160,15 @@ def _start_request_timer():
         host = _normalize_http_host(request.host)
         if not peer or peer != host:
             return _json_err("Cross-origin requests are not allowed", 403)
+    # Opt-in HTTP→HTTPS redirect (Settings). Never redirect TLS recovery endpoints.
+    if request.method == "GET" and not request.is_secure and not _https_redirect_exempt(request.path):
+        cfg = load_config()
+        if bool(cfg.get("https_redirect")) and tls_status(cfg).get("tls_ready"):
+            host = request.host.split(":")[0] or "localhost"
+            target = f"https://{host}{request.full_path}"
+            if target.endswith("?"):
+                target = target[:-1]
+            return redirect(target, code=302)
     # Per-request latency tracing to distinguish AP/network delays from handler time.
     request._blockvase_start = time.perf_counter()  # type: ignore[attr-defined]
 
@@ -196,6 +216,39 @@ def _safe_device_name(name: str) -> str:
     return (out or "blockvase")[:19]
 
 
+def _ensure_portal_tls(device_name: str | None = None, *, force: bool = False) -> None:
+    """Create/refresh device TLS cert + nginx site via root-owned helper."""
+    if os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() != "true":
+        return
+    script = _privileged_script("ensure-portal-tls.sh")
+    if not script.is_file():
+        return
+    cmd = ["sudo", "-n", str(script)]
+    if force:
+        cmd.append("--force")
+    if device_name:
+        cmd.extend(["--hostname", _safe_device_name(device_name)])
+    try:
+        result = subprocess.run(
+            cmd,
+            timeout=60,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            _log.warning(
+                "ensure-portal-tls failed (rc=%s): stdout=%r stderr=%r",
+                result.returncode,
+                result.stdout,
+                result.stderr,
+            )
+    except (subprocess.TimeoutExpired, OSError) as ex:
+        _log.warning("ensure-portal-tls error: %s", ex)
+
+
 def _sync_hostname(device_name: str) -> None:
     """Set Linux hostname from device name so mDNS (hostname.local) matches the portal."""
     if os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() != "true":
@@ -221,6 +274,8 @@ def _sync_hostname(device_name: str) -> None:
             )
     except (OSError, subprocess.SubprocessError) as ex:
         _log.warning("hostnamectl: %s", ex)
+    # Reissue portal cert SANs for <name>.local when hostname changes.
+    _ensure_portal_tls(safe, force=False)
 
 
 def _invoke_reboot() -> None:
@@ -2031,10 +2086,13 @@ def factory_reset():
     cfg["totp_pending_secret_enc"] = ""
     cfg["mining_payout_address"] = ""
     cfg["mining_payout_source"] = ""
+    cfg["https_redirect"] = False
     cfg["rpc"] = json.loads(json.dumps(DEFAULT_CONFIG["rpc"]))
     cfg["rpc"].update(preserved_rpc)
     _apply_local_rpc(cfg)
     save_config(cfg)
+    # New device identity cert after wipe (old client trust becomes invalid).
+    _ensure_portal_tls(force=True)
     ap_script = _privileged_script("ap-mode.sh")
     if ap_script.exists():
         try:
@@ -2235,8 +2293,106 @@ _start_update_check_thread()
 _start_mining_sync_thread()
 
 
+@app.get("/api/tls/status")
+def api_tls_status():
+    cfg = load_config()
+    status = tls_status(cfg)
+    status["request_is_secure"] = bool(request.is_secure)
+    status["show_http_banner"] = bool(
+        status.get("tls_ready") and (not request.is_secure) and (not status.get("https_redirect"))
+    )
+    return jsonify(status)
+
+
+@app.get("/api/tls/cert.crt")
+def api_tls_cert_download():
+    """Download the device CA (install/trust this on each client phone/computer)."""
+    pem = read_cert_pem()
+    if not pem:
+        return _json_err("Portal TLS CA certificate is not available yet", 404)
+    cfg = load_config()
+    name = _safe_device_name(str(cfg.get("device_name") or "blockvase"))
+    response = make_response(pem)
+    response.headers["Content-Type"] = "application/x-x509-ca-cert"
+    response.headers["Content-Disposition"] = f'attachment; filename="{name}-portal-ca.crt"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/api/tls/regenerate")
+def api_tls_regenerate():
+    body = request.get_json(force=True, silent=True) or {}
+    cfg = load_config()
+    token_err = _require_admin_token(cfg, body)
+    if token_err:
+        return token_err
+    step_err = _require_step_up_when_configured(cfg, body)
+    if step_err:
+        return step_err
+    cfg["https_redirect"] = False
+    save_config(cfg)
+    _ensure_portal_tls(str(cfg.get("device_name") or "blockvase"), force=True)
+    status = tls_status(load_config())
+    if not status.get("tls_ready"):
+        return _json_err("Could not regenerate TLS certificate (is ensure-portal-tls installed?)", 500)
+    return _json_ok(
+        message=(
+            "New device CA and portal certificate created. "
+            "Re-install the CA on every client device and enable full trust (iOS). "
+            "HTTPS redirect was turned off."
+        ),
+        **status,
+    )
+
+
+@app.post("/api/tls/https-redirect")
+def api_tls_https_redirect():
+    """Enable/disable prefer-HTTPS redirect. Disabling over HTTP needs password only (recovery)."""
+    body = request.get_json(force=True, silent=True) or {}
+    cfg = load_config()
+    enabled = bool(body.get("enabled"))
+    if enabled:
+        token_err = _require_admin_token(cfg, body)
+        if token_err:
+            return token_err
+        step_err = _require_step_up_when_configured(cfg, body)
+        if step_err:
+            return step_err
+        if not tls_status(cfg).get("tls_ready"):
+            return _json_err("Install/generate the portal certificate before enabling HTTPS redirect", 400)
+    else:
+        # Recovery path: allow turning redirect off with admin password even if Secure cookie missing.
+        if _is_token_valid(cfg, _request_admin_token()):
+            step_err = _require_step_up_when_configured(cfg, body)
+            if step_err:
+                return step_err
+        else:
+            step_err = _require_step_up_password(cfg, body)
+            if step_err:
+                return step_err
+    cfg["https_redirect"] = enabled
+    save_config(cfg)
+    return _json_ok(
+        https_redirect=enabled,
+        message=(
+            "HTTP will redirect to HTTPS. Keep a way to open Settings if a client has not trusted the cert yet."
+            if enabled
+            else "HTTPS redirect disabled. Portal stays available over HTTP."
+        ),
+        **tls_status(cfg),
+    )
+
+
 if __name__ == "__main__":
-    host = os.getenv("BLOCKVASE_HOST", "0.0.0.0")
-    port = int(os.getenv("BLOCKVASE_PORT", "80"))
-    serve(app, host=host, port=port)
+    # Behind nginx by default (loopback). Direct bind still supported for dev.
+    host = os.getenv("BLOCKVASE_HOST", "127.0.0.1")
+    port = int(os.getenv("BLOCKVASE_PORT", "8080"))
+    serve(
+        app,
+        host=host,
+        port=port,
+        trusted_proxy="127.0.0.1",
+        trusted_proxy_count=1,
+        trusted_proxy_headers="x-forwarded-for x-forwarded-host x-forwarded-proto x-forwarded-port",
+    )
 

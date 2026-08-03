@@ -349,6 +349,12 @@ run_clone_safety() {
     else
       echo "clone-safety: preserving custom hostname: ${current_hostname}"
     fi
+    # New portal TLS identity for this clone/hardware.
+    if [[ -x /usr/lib/blockvase/ensure-portal-tls.sh ]]; then
+      /usr/lib/blockvase/ensure-portal-tls.sh --force --hostname "$(hostname -s 2>/dev/null || echo blockvase)" || true
+    elif [[ -x "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" ]]; then
+      "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" --force --hostname "$(hostname -s 2>/dev/null || echo blockvase)" || true
+    fi
   else
     if [[ -z "$previous_fp" ]]; then
       echo "clone-safety: recording device identity fingerprint for future clone detection"
@@ -403,6 +409,8 @@ prepare_clone_source() {
   clear_stale_wifi_client_profiles
   clear_mining_runtime
   clear_imaging_host_secrets
+  # Wipe TLS so each flashed unit regenerates its own portal cert on first boot.
+  rm -rf /etc/blockvase/tls 2>/dev/null || true
 
   python3 - "$CONFIG_JSON" <<'PY'
 import json, secrets, sys
@@ -427,6 +435,7 @@ cfg["admin_username"] = ""
 cfg["admin_password_hash"] = ""
 cfg["mining_payout_address"] = ""
 cfg["mining_payout_source"] = ""
+cfg["https_redirect"] = False
 cfg.pop("mining_simulation_enabled", None)
 cfg.setdefault("device_name", "blockvase")
 if isinstance(cfg.get("rpc"), dict):
@@ -441,6 +450,7 @@ print("wifi credentials cleared")
 print("admin credentials cleared")
 print("2FA secrets cleared")
 print("mining payout cleared")
+print("https_redirect cleared")
 print("setup_token regenerated")
 print("ap_password regenerated (clones refresh again on first boot)")
 PY

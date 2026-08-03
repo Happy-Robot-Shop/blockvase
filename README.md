@@ -326,16 +326,19 @@ After setup:
 
 | Open | Purpose |
 |------|---------|
-| `http://<pi-ip>/` | Main portal |
+| `http://<pi-ip>/` | Main portal (default) |
 | `http://<hostname>.local/` | Same, via Avahi |
+| `https://<hostname>.local/` | Same over TLS after you install this device’s certificate |
 | `/display` | Kiosk-style view |
 | `/mempool` | Mempool view |
 | `/wallet` | Portal spend wallet: send/receive + descriptor backup (admin login; send/backup need password re-entry) |
-| `/settings` | Admin settings (password from setup), including solo-mining payout |
+| `/settings` | Admin settings (password from setup), including solo-mining payout and portal certificate |
 
 Setup creates a receiving address in the **portal spend wallet** (`blockvase-spend`) for solo-mining payouts by default, so rewards appear under `/wallet`. Override or regenerate it in **Settings → Solo Mining**; hashing waits until the node finishes IBD/catch-up. A custom payout address can point anywhere (cold wallet, etc.).
 
-`/wallet` send/receive/history/backup use that same spend wallet. Export a descriptor backup from `/wallet` and store it offline—clone prep and factory reset wipe wallet keys. The portal stays on plain HTTP (no device TLS certs); admin cookies use `Secure` only when the request is already HTTPS (e.g. a reverse proxy). Keep the portal on a trusted LAN (do not expose `:80` to the internet). Enable TOTP in Settings; password re-entry (+ TOTP when enabled) is required for wallet send/backup, mining payout changes, credential changes, factory reset, and device updates.
+`/wallet` send/receive/history/backup use that same spend wallet. Export a descriptor backup from `/wallet` and store it offline—clone prep and factory reset wipe wallet keys.
+
+**Portal TLS:** HTTP on `:80` always works. nginx terminates optional HTTPS on `:443` using a **device private CA** + leaf cert (`/etc/blockvase/tls/`). Download the **CA** `.crt` from Settings (or the HTTP banner / setup card), install it on each phone or computer (on iPhone also enable Full Trust under Certificate Trust Settings), then open `https://<name>.local`. Prefer-HTTPS redirect is **off by default** (enable in Settings only after clients trust the CA). Admin cookies use `Secure` when the request is already HTTPS. Keep the portal on a trusted LAN (do not expose `:80`/`:443` to the internet). Enable TOTP in Settings; password re-entry (+ TOTP when enabled) is required for wallet send/backup, mining payout changes, credential changes, factory reset, device updates, and certificate regenerate / HTTPS-redirect changes.
 
 **Setup Wi-Fi (before home Wi-Fi is saved)**
 
@@ -355,7 +358,10 @@ If home Wi-Fi join fails (at setup or later if Wi-Fi drops), the device returns 
 Phone / browser / HDMI kiosk
             |
             v
-   blockvase.service  (web portal)
+   nginx (:80 HTTP, :443 HTTPS)
+            |
+            v
+   blockvase.service  (Waitress on 127.0.0.1:8080)
             |
             v
    Bitcoin Knots (local node)     + optional external fee APIs
@@ -363,7 +369,8 @@ Phone / browser / HDMI kiosk
 
 At a glance:
 
-- The **portal** (`blockvase.service`) serves the UI and APIs.
+- **nginx** terminates LAN HTTP/HTTPS and proxies to the portal.
+- The **portal** (`blockvase.service`) serves the UI and APIs on loopback.
 - The **node** (`bitcoind`) stores the chain under `/var/lib/bitcoind`. P2P sync stays off until home Wi-Fi is configured (`setup_complete` + `wifi_ssid`), so an ethernet-only / AP-setup master does not grow the chain; after setup Wi-Fi is saved, sync runs normally.
 - **Solo mining** is DATUM Gateway + local Knots (block templates). By default a payout address is generated from the portal spend wallet at setup (overridable in Settings). PiAxe uses Stratum v1 only as the local cable to DATUM on `127.0.0.1:23334`. This is not pool Stratum mining.
 - The **kiosk** is a full-screen Chromium session on HDMI (not the Pi desktop).
@@ -376,7 +383,8 @@ At a glance:
 |------|------|
 | `blockvase-ap.service` | Clone safety + setup hotspot / home Wi-Fi |
 | `bitcoind.service` | Bitcoin Knots (starts after `blockvase-ap`) |
-| `blockvase.service` | Web portal |
+| `nginx.service` | HTTP `:80` + HTTPS `:443` → portal |
+| `blockvase.service` | Web portal (Waitress `127.0.0.1:8080`) |
 | `blockvase-kiosk.service` | HDMI kiosk |
 | `blockvase-switch-to-kiosk-vt.service` | Switches to the kiosk screen early in boot |
 | `blockvase-chain-guard.timer` | Auto-recovery if chainstate corrupts |
@@ -396,7 +404,8 @@ sudo systemctl status blockvase-ap bitcoind blockvase blockvase-kiosk
 | Kiosk | `startx` + `scripts/kiosk-session.sh` on `:0` / VT7 |
 | AP / Wi-Fi | `scripts/ap-mode.sh` via NetworkManager (`nmcli`) |
 | Clone / expand | `scripts/clone-safety.sh` (from `ap-mode ensure` and once from bootstrap) |
-| Port | `80` by default (`BLOCKVASE_PORT`) |
+| Port | nginx `:80`/`:443`; Waitress `BLOCKVASE_HOST=127.0.0.1` `BLOCKVASE_PORT=8080` |
+| Portal TLS | `scripts/ensure-portal-tls.sh` → `/etc/blockvase/tls/`; Settings download + opt-in `https_redirect` |
 | System actions | `/api/reboot` needs admin session; `/api/factory-reset` and `/api/device-update` need session **+ password/+TOTP step-up** and `ENABLE_SYSTEM_ACTIONS=true` |
 | Device update | Settings → **Update device** (step-up) runs root-owned `/usr/lib/blockvase/device-update.sh` (verify pinned `origin` + **SSH-signed tip** via root-owned verifier + `/etc/blockvase` allowlists, then `git pull --ff-only` + `bootstrap.sh`). Source allowlists live in `security/`; appliances must not store the OTA private key. Kiosk + portal show a full-screen updating overlay. A background check (~every 30m) highlights the button when commits are available. |
 | Admin 2FA | Settings → Admin login → **Two-factor authentication** (strongly recommended TOTP). When enabled, login is password then authenticator code; step-up actions also require the code. Login/step-up are rate-limited. |
@@ -430,6 +439,10 @@ sudo systemctl status blockvase-ap bitcoind blockvase blockvase-kiosk
 | POST | `/api/wallet/send` | Send from spend wallet (admin session + password/+TOTP step-up; amount as decimal string; blocked during IBD) |
 | POST | `/api/wallet/backup` | Export spend-wallet private descriptors (admin session + password/+TOTP step-up) |
 | POST | `/api/mining-payout` | Set solo payout address (admin session + password/+TOTP step-up) |
+| GET | `/api/tls/status` | Certificate readiness, fingerprint, prefer-HTTPS flag, HTTP banner hint |
+| GET | `/api/tls/cert.crt` | Download device **CA** certificate (install/trust this on clients) |
+| POST | `/api/tls/regenerate` | New cert (admin session + step-up; clears prefer-HTTPS) |
+| POST | `/api/tls/https-redirect` | Enable/disable HTTP→HTTPS redirect (step-up; disable allowed over HTTP for recovery) |
 
 Setup auth: setup token (`?token=`, `X-Setup-Token`, or JSON `token`) or admin cookie after login.
 

@@ -32,11 +32,20 @@ git push origin HEAD:main   # requires repo Admin (ruleset bypass)
 
 The matching public key is `security/ota-signing.pub`. Keep the private key offline/out of the repo and off customer devices.
 
+## Portal TLS (self-signed)
+
+- nginx listens on LAN `:80` (always) and `:443` (when leaf + CA exist under `/etc/blockvase/tls/`).
+- Waitress binds `127.0.0.1:8080` only; `X-Forwarded-Proto` makes `request.is_secure` / `Secure` cookies work on HTTPS.
+- Trust model is a **device private CA** (`ca.crt` / `ca.key`) that signs the portal leaf (`portal.crt` / `portal.key`). Clients install **`ca.crt`** (not the leaf). On iOS, also enable Full Trust for that CA.
+- **Prefer HTTPS redirect is opt-in** (`https_redirect` in config). The server cannot detect whether a browser trusted the CA; forcing redirect before trust bricks access with TLS warnings. Settings/setup and `/api/tls/*` stay reachable over HTTP for recovery.
+- Regenerating TLS or changing the device hostname reissues CA/leaf/SANs; clients must re-install the CA.
+- Clone prep wipes `/etc/blockvase/tls`; first boot / bootstrap recreates it via `ensure-portal-tls.sh`.
+
 ## Portal threat notes
 
-- Portal listens on LAN HTTP by design; do not port-forward `:80` to the internet.
+- Do not port-forward `:80` or `:443` to the internet.
 - Enable TOTP in Settings after setup; login and step-up are rate-limited.
-- Changing admin password, mining payout, wallet send/backup, factory reset, and device update require password re-entry (+ TOTP when enabled).
+- Changing admin password, mining payout, wallet send/backup, factory reset, device update, cert regenerate, and prefer-HTTPS require password re-entry (+ TOTP when enabled).
 - Optional host firewall: only enable UFW if you understand your LAN management path (SSH/Cursor can be locked out).
 
 ## GitHub: PR-only `main`, open PRs for anyone

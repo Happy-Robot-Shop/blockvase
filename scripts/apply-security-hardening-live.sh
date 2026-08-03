@@ -15,7 +15,7 @@ mkdir -p /usr/lib/blockvase /etc/blockvase /var/lib/blockvase
 echo "${PROJECT_DIR}" >/etc/blockvase/project-dir
 chmod 644 /etc/blockvase/project-dir
 
-for s in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-miner-refresh-env.sh verify-ota-update.sh; do
+for s in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-miner-refresh-env.sh verify-ota-update.sh ensure-portal-tls.sh; do
   if [[ -f "${PROJECT_DIR}/scripts/${s}" ]]; then
     install -o root -g root -m 755 "${PROJECT_DIR}/scripts/${s}" "/usr/lib/blockvase/${s}"
   fi
@@ -29,8 +29,13 @@ if [[ -f "${PROJECT_DIR}/security/ota-allowed-signers" ]]; then
     "${PROJECT_DIR}/security/ota-allowed-signers" /etc/blockvase/ota-allowed-signers
 fi
 chmod +x "${PROJECT_DIR}/scripts/verify-ota-update.sh" 2>/dev/null || true
+chmod +x "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" 2>/dev/null || true
 # Appliances must not keep the OTA private signing key.
 rm -f "/home/${SERVICE_USER}/.blockvase-secrets/ota-signing" 2>/dev/null || true
+# Portal TLS + nginx package (site/reload happens after Waitress moves off :80).
+if command -v apt-get >/dev/null 2>&1; then
+  DEBIAN_FRONTEND=noninteractive apt-get install -y nginx openssl >/dev/null 2>&1 || true
+fi
 # Drop blanket sudo from %sudo; keep NOPASSWD appliance rules below.
 if id -nG "${SERVICE_USER}" 2>/dev/null | tr ' ' '\n' | grep -qx sudo; then
   gpasswd -d "${SERVICE_USER}" sudo 2>/dev/null || true
@@ -48,12 +53,15 @@ EOF
 cat >/etc/sudoers.d/blockvase-device-update <<EOF
 ${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/device-update.sh
 EOF
+cat >/etc/sudoers.d/blockvase-portal-tls <<EOF
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/ensure-portal-tls.sh
+EOF
 cat >/etc/sudoers.d/blockvase-check-asic <<EOF
 ${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop blockvase-miner.service, /usr/bin/systemctl start blockvase-miner.service, /usr/bin/systemctl restart blockvase-miner.service
 EOF
 chmod 440 /etc/sudoers.d/blockvase-ap /etc/sudoers.d/blockvase-mining-payout \
   /etc/sudoers.d/blockvase-miner-env /etc/sudoers.d/blockvase-device-update \
-  /etc/sudoers.d/blockvase-check-asic
+  /etc/sudoers.d/blockvase-portal-tls /etc/sudoers.d/blockvase-check-asic
 
 install -o root -g root -m 644 "${PROJECT_DIR}/systemd/bitcoind.service" /etc/systemd/system/bitcoind.service
 
@@ -111,7 +119,30 @@ PY
 
 visudo -c
 systemctl daemon-reload
+# Waitress must leave :80 before nginx can bind (loopback :8080 only).
 systemctl restart blockvase.service
+# Brief wait so the old :80 listener is gone.
+for _i in 1 2 3 4 5 6 7 8 9 10; do
+  if ! ss -tln | grep -q ':80 '; then
+    break
+  fi
+  # Still bound — only OK if it is already nginx.
+  if systemctl is-active --quiet nginx.service; then
+    break
+  fi
+  sleep 0.5
+done
+if [[ -x /usr/lib/blockvase/ensure-portal-tls.sh ]]; then
+  /usr/lib/blockvase/ensure-portal-tls.sh || true
+elif [[ -x "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" ]]; then
+  "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" || true
+fi
+systemctl enable nginx.service >/dev/null 2>&1 || true
+systemctl restart nginx.service || true
+if ! systemctl is-active --quiet nginx.service; then
+  echo "ERROR: nginx is not active. Portal may only be reachable on 127.0.0.1:8080." >&2
+  systemctl status nginx.service --no-pager -l 2>&1 | head -25 >&2 || true
+fi
 systemctl restart blockvase-ap.service || true
 # Miner picks up rest.py debug=False + thermal trip helper on next restart.
 systemctl restart blockvase-miner.service || true
@@ -120,6 +151,8 @@ echo "Live security hardening applied."
 echo "  - /usr/lib/blockvase scripts + sudoers"
 echo "  - root-owned OTA allowlists under /etc/blockvase"
 echo "  - appliance OTA private key removed (if present)"
-echo "  - root-owned bitcoind.service + AmbientCapabilities portal unit"
+echo "  - nginx :80/:443 → Waitress 127.0.0.1:8080 + portal TLS cert"
+echo "  - root-owned bitcoind.service"
 echo "  - setcap removed from system Python (if present)"
 echo "  - wifi.secret migrated into wifi_password_enc"
+echo "  - nginx active: $(systemctl is-active nginx.service 2>/dev/null || echo unknown)"

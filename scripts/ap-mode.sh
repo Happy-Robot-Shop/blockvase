@@ -505,6 +505,12 @@ after_factory_reset() {
   fi
   nmcli connection delete "${CLIENT_CONN}" 2>/dev/null || true
   nmcli connection delete "${HOTSPOT_CONN}" 2>/dev/null || true
+  # New portal TLS identity (portal also forces regenerate; this covers CLI/script paths).
+  if [[ -x /usr/lib/blockvase/ensure-portal-tls.sh ]]; then
+    /usr/lib/blockvase/ensure-portal-tls.sh --force || true
+  elif [[ -x "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" ]]; then
+    "${PROJECT_DIR}/scripts/ensure-portal-tls.sh" --force || true
+  fi
 }
 
 # Install Wi-Fi recovery timer + NetworkManager dispatcher (also done by bootstrap).

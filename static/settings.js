@@ -9,7 +9,7 @@ function withToken(path) {
 
 function setStepUpTotpVisible(enabled) {
   totpEnabled = !!enabled;
-  ["adminCurrentTotpWrap", "miningPayoutTotpWrap", "actionStepUpTotpWrap"].forEach((id) => {
+  ["adminCurrentTotpWrap", "miningPayoutTotpWrap", "actionStepUpTotpWrap", "tlsStepUpTotpWrap"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = totpEnabled ? "block" : "none";
   });
@@ -256,14 +256,134 @@ function refreshTotpUi() {
       if (disablePanel && !on) disablePanel.style.display = "none";
       const miningUser = document.getElementById("miningPayoutUsername");
       const actionUser = document.getElementById("actionStepUpUsername");
+      const tlsUser = document.getElementById("tlsStepUpUsername");
       if (d.username) {
         if (miningUser && !miningUser.value) miningUser.value = d.username;
         if (actionUser && !actionUser.value) actionUser.value = d.username;
+        if (tlsUser && !tlsUser.value) tlsUser.value = d.username;
       }
+      refreshTlsPanel();
     })
     .catch(() => {
       if (stateLabel) stateLabel.textContent = "Status: unavailable";
     });
+}
+
+function refreshTlsPanel() {
+  const stateLabel = document.getElementById("tlsStateLabel");
+  const fp = document.getElementById("tlsFingerprint");
+  const sans = document.getElementById("tlsSans");
+  const redirect = document.getElementById("tlsHttpsRedirect");
+  const openBtn = document.getElementById("tlsOpenHttpsBtn");
+  const setupCard = document.getElementById("setupTlsCard");
+  const setupFp = document.getElementById("setupTlsFingerprint");
+  const setupHint = document.getElementById("setupTlsHostHint");
+  return fetch("/api/tls/status", { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      if (!d) {
+        if (stateLabel) stateLabel.textContent = "Status: unavailable";
+        return;
+      }
+      if (stateLabel) {
+        stateLabel.textContent = d.tls_ready
+          ? d.https_redirect
+            ? "Status: certificate ready · prefer HTTPS on"
+            : "Status: certificate ready · HTTP default"
+          : "Status: certificate not generated yet";
+      }
+      if (fp) {
+        fp.textContent = d.fingerprint_sha256
+          ? "CA SHA-256: " + d.fingerprint_sha256
+          : "";
+      }
+      if (sans) {
+        sans.textContent = Array.isArray(d.sans) && d.sans.length
+          ? "Portal SANs: " + d.sans.join(", ")
+          : "";
+      }
+      if (redirect) redirect.checked = !!d.https_redirect;
+      if (openBtn) {
+        openBtn.href = d.https_url || "#";
+        openBtn.style.display = d.tls_ready ? "" : "none";
+      }
+      if (setupCard) setupCard.style.display = d.tls_ready ? "block" : "none";
+      if (setupFp) {
+        setupFp.textContent = d.fingerprint_sha256 ? "CA SHA-256: " + d.fingerprint_sha256 : "";
+      }
+      if (setupHint && d.https_url) setupHint.textContent = d.https_url.replace(/\/$/, "");
+      if (window.BlockvaseTlsGuide && typeof window.BlockvaseTlsGuide.refreshAllGuides === "function") {
+        window.BlockvaseTlsGuide.refreshAllGuides(d.https_url || "");
+      }
+      if (typeof window.refreshPortalTlsBanner === "function") window.refreshPortalTlsBanner();
+    })
+    .catch(() => {
+      if (stateLabel) stateLabel.textContent = "Status: unavailable";
+    });
+}
+
+function saveTlsHttpsRedirect() {
+  const statusDiv = document.getElementById("tlsPanelStatus");
+  const enabled = !!document.getElementById("tlsHttpsRedirect")?.checked;
+  const stepUp = readStepUpFields("tlsStepUp");
+  if (!requireStepUpFields(stepUp, statusDiv)) return;
+  showStatus(statusDiv, "info", enabled ? "Enabling HTTPS redirect..." : "Disabling HTTPS redirect...");
+  fetch(withToken("/api/tls/https-redirect"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      enabled,
+      username: stepUp.username,
+      password: stepUp.password,
+      totp_code: stepUp.totp_code,
+    }),
+  })
+    .then((r) => parseJsonResponse(r).then((d) => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      clearStepUpSecrets("tlsStepUp");
+      if (!ok || !d.success) {
+        showStatus(statusDiv, "error", d.error || "Could not update HTTPS preference");
+        refreshTlsPanel();
+        return;
+      }
+      showStatus(statusDiv, "success", d.message || "Saved");
+      refreshTlsPanel();
+    })
+    .catch((err) => showStatus(statusDiv, "error", "Error: " + err.message));
+}
+
+function regenerateTlsCert() {
+  const statusDiv = document.getElementById("tlsPanelStatus");
+  const stepUp = readStepUpFields("tlsStepUp");
+  if (!requireStepUpFields(stepUp, statusDiv)) return;
+  if (
+    !confirm(
+      "Regenerate the device CA and portal certificate? Every phone and computer must install the new CA again (and re-enable Full Trust on iPhone). Prefer HTTPS will be turned off."
+    )
+  ) {
+    return;
+  }
+  showStatus(statusDiv, "info", "Regenerating certificate...");
+  fetch(withToken("/api/tls/regenerate"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: stepUp.username,
+      password: stepUp.password,
+      totp_code: stepUp.totp_code,
+    }),
+  })
+    .then((r) => parseJsonResponse(r).then((d) => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      clearStepUpSecrets("tlsStepUp");
+      if (!ok || !d.success) {
+        showStatus(statusDiv, "error", d.error || "Could not regenerate certificate");
+        return;
+      }
+      showStatus(statusDiv, "success", d.message || "Certificate regenerated");
+      refreshTlsPanel();
+    })
+    .catch((err) => showStatus(statusDiv, "error", "Error: " + err.message));
 }
 
 function beginTotpSetup() {
@@ -1064,6 +1184,8 @@ document.getElementById("totpDisableBtn")?.addEventListener("click", () => {
   if (panel) panel.style.display = panel.style.display === "none" || !panel.style.display ? "block" : "none";
 });
 document.getElementById("totpDisableConfirmBtn")?.addEventListener("click", disableTotp);
+document.getElementById("tlsSaveRedirectBtn")?.addEventListener("click", saveTlsHttpsRedirect);
+document.getElementById("tlsRegenerateBtn")?.addEventListener("click", regenerateTlsCert);
 
 let statsInterval = null;
 let settingsStarted = false;
@@ -1080,6 +1202,7 @@ async function startSettingsPage() {
   loadAdminCredentials();
   loadMiningPayout();
   refreshTotpUi();
+  refreshTlsPanel();
   refreshUpdateAvailability(true);
   if (!statsInterval) statsInterval = setInterval(refreshStats, 5000);
   if (!updateCheckInterval) {

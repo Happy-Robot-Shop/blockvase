@@ -44,6 +44,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "mining_payout_address": "",
     # "node" = generated from local Knots wallet; "custom" = user-entered external address.
     "mining_payout_source": "",
+    # After the user installs the device TLS cert on their phone/laptop, they may opt in
+    # to HTTP→HTTPS redirects. Default stays HTTP so setup/recovery never bricks.
+    "https_redirect": False,
     "rpc": {
         "host": "127.0.0.1",
         "port": 8332,
