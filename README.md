@@ -168,7 +168,7 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 - **Software:** Vendored under `piaxe-miner/` (not cloned at bootstrap). Launched by `scripts/blockvase-miner-run.sh` / `systemd/blockvase-miner.service`.
 - Default config: `piaxe-miner/config.blockvase.yml`.
 - Connects to **local DATUM only** (`stratum+tcp://127.0.0.1:23334`) when a payout address is set. It never connects to an external Stratum pool URL.
-- **Payout address:** a fresh receiving address is generated from the local Knots wallet (`blockvase`) during setup (wallet RPC works during IBD). Override or regenerate it in Settings → Solo Mining. DATUM/hashing stays deferred until the node leaves IBD/catch-up.
+- **Payout address:** by default a fresh address is generated from the portal spend wallet (`blockvase-spend`) during setup (wallet RPC works during IBD) so mining rewards show up in `/wallet`. Override with any external address (or regenerate) in Settings → Solo Mining. DATUM/hashing stays deferred until the node leaves IBD/catch-up.
 - **Bootstrap patches:** `scripts/install-mining-stack.sh` runs `scripts/apply-piaxe-miner-patches.sh`, which applies idempotent diffs from `scripts/patches/piaxe-miner/` before creating the Python venv. That path matters if you replace `piaxe-miner/` with a fresh upstream tree; a normal Blockvase checkout already includes the same changes inline.
 
 **Blockvase modifications**
@@ -289,7 +289,7 @@ Run install commands over **SSH** if a desktop is already on screen. Bootstrap t
    ```
 3. After reboot, join the device’s setup Wi-Fi (QR on the HDMI screen, or scan with your phone).
 4. Open the setup page, create an admin username and password, and enter your home Wi-Fi. The Pi will join that network and reboot.
-5. After setup, Blockvase creates a **fresh receiving address** in the device’s local Knots wallet for solo-mining payouts. Change or regenerate it anytime under **Settings → Solo Mining**.
+5. After setup, Blockvase creates a **fresh receiving address** in the device’s portal wallet for solo-mining payouts (same wallet as `/wallet`). Change or regenerate it anytime under **Settings → Solo Mining**, or paste an external address.
 
 **What bootstrap installs:** packages, Bitcoin Knots, the mining stack (UART/I2C/PWM prep, DATUM build, piaxe-miner venv, and any `scripts/patches/piaxe-miner/*.patch`; miner enabled for board monitoring; hashing starts once a payout address exists and the node is synced), systemd services, and kiosk mode. It also records a device fingerprint in `/var/lib/blockvase/device-identity.env`. Re-running bootstrap updates the software and does **not** wipe the blockchain.
 
@@ -330,10 +330,12 @@ After setup:
 | `http://<hostname>.local/` | Same, via Avahi |
 | `/display` | Kiosk-style view |
 | `/mempool` | Mempool view |
-| `/wallet` | Send/receive with the on-device Knots wallet (admin login) |
+| `/wallet` | Portal spend wallet: send/receive + descriptor backup (admin login; send/backup need password re-entry) |
 | `/settings` | Admin settings (password from setup), including solo-mining payout |
 
-Setup creates a new Knots-wallet receiving address for mining payouts automatically. Override it (or generate another) in **Settings → Solo Mining**; hashing waits until the node finishes IBD/catch-up.
+Setup creates a receiving address in the **portal spend wallet** (`blockvase-spend`) for solo-mining payouts by default, so rewards appear under `/wallet`. Override or regenerate it in **Settings → Solo Mining**; hashing waits until the node finishes IBD/catch-up. A custom payout address can point anywhere (cold wallet, etc.).
+
+`/wallet` send/receive/history/backup use that same spend wallet. Export a descriptor backup from `/wallet` and store it offline—clone prep and factory reset wipe wallet keys. The portal stays on plain HTTP (no device TLS certs); admin cookies use `Secure` only when the request is already HTTPS (e.g. a reverse proxy).
 
 **Setup Wi-Fi (before home Wi-Fi is saved)**
 
@@ -363,7 +365,7 @@ At a glance:
 
 - The **portal** (`blockvase.service`) serves the UI and APIs.
 - The **node** (`bitcoind`) stores the chain under `/var/lib/bitcoind`. P2P sync stays off until home Wi-Fi is configured (`setup_complete` + `wifi_ssid`), so an ethernet-only / AP-setup master does not grow the chain; after setup Wi-Fi is saved, sync runs normally.
-- **Solo mining** is DATUM Gateway + local Knots (block templates). A fresh receiving address is generated from the on-device wallet at setup (overridable in Settings). PiAxe uses Stratum v1 only as the local cable to DATUM on `127.0.0.1:23334`. This is not pool Stratum mining.
+- **Solo mining** is DATUM Gateway + local Knots (block templates). By default a payout address is generated from the portal spend wallet at setup (overridable in Settings). PiAxe uses Stratum v1 only as the local cable to DATUM on `127.0.0.1:23334`. This is not pool Stratum mining.
 - The **kiosk** is a full-screen Chromium session on HDMI (not the Pi desktop).
 - **Setup networking** uses a temporary hotspot, then a saved home Wi-Fi profile.
 - On every boot, **clone safety** checks whether this image was cloned onto new hardware; if so, it refreshes identity and expands the disk before the node starts.
@@ -420,10 +422,11 @@ sudo systemctl status blockvase-ap bitcoind blockvase blockvase-kiosk
 | GET | `/api/rpc` | Local RPC status (password never returned) |
 | GET/POST | `/api/device-name`, `/api/display-offset` | Device label / display offset |
 | GET/POST | `/api/device-update` | Status / start git pull + bootstrap (admin + system actions) |
-| GET | `/api/wallet` | On-device wallet balances, receive address, recent txs (admin) |
-| POST | `/api/wallet/receive` | New receiving address (admin) |
+| GET | `/api/wallet` | Spend-wallet balances + recent txs (admin; does not mint addresses) |
+| POST | `/api/wallet/receive` | New spend-wallet receiving address (admin) |
 | GET | `/api/wallet/receive-qr.svg` | Receive address QR (admin) |
-| POST | `/api/wallet/send` | Send Bitcoin from the on-device wallet (admin; blocked during IBD) |
+| POST | `/api/wallet/send` | Send from spend wallet (admin session + password/+TOTP step-up; amount as decimal string; blocked during IBD) |
+| POST | `/api/wallet/backup` | Export spend-wallet private descriptors (admin session + password/+TOTP step-up) |
 
 Setup auth: setup token (`?token=`, `X-Setup-Token`, or JSON `token`) or admin cookie after login.
 

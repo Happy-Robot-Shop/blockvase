@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -34,13 +35,20 @@ from .config import (
 )
 from .mining_metrics import fetch_mining_metrics
 from .mining_wallet import (
+    address_is_legacy_mining_mine,
     address_is_mine,
+    address_is_spend_mine,
+    export_spend_wallet_descriptors,
+    format_btc_decimal,
+    legacy_mining_wallet_balances,
     new_mining_payout_address,
+    new_spend_receive_address,
     node_sync_status,
-    send_from_wallet,
+    parse_btc_amount,
+    send_from_spend_wallet,
+    spend_wallet_balances,
+    spend_wallet_recent_transactions,
     validate_bitcoin_address,
-    wallet_balances,
-    wallet_recent_transactions,
 )
 from .state import StateManager
 from .totp import generate_secret, otpauth_uri, verify_totp
@@ -94,6 +102,27 @@ _update_availability: dict[str, Any] = {
 _pending_2fa_lock = threading.Lock()
 _pending_2fa: dict[str, dict[str, Any]] = {}
 _PENDING_2FA_TTL_SEC = 5 * 60
+_mining_payout_ensure_lock = threading.Lock()
+
+
+def _normalize_http_host(host: str | None) -> str:
+    """Lowercase host and strip default ports so localhost vs localhost:80 match.
+
+    Also normalizes IPv6 literals: [::1]:80 → [::1].
+    """
+    h = (host or "").strip().lower()
+    if h.startswith("["):
+        # [::1]:80 / [2001:db8::1]:443
+        if h.endswith("]:80"):
+            return h[:-3]
+        if h.endswith("]:443"):
+            return h[:-4]
+        return h
+    if h.endswith(":80"):
+        return h[:-3]
+    if h.endswith(":443"):
+        return h[:-4]
+    return h
 
 
 def _request_origin_host() -> str | None:
@@ -110,8 +139,9 @@ def _request_origin_host() -> str | None:
 def _start_request_timer():
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         # Require same-origin Origin or Referer on mutating requests (CSRF).
-        peer = _request_origin_host()
-        if not peer or peer != request.host:
+        peer = _normalize_http_host(_request_origin_host())
+        host = _normalize_http_host(request.host)
+        if not peer or peer != host:
             return _json_err("Cross-origin requests are not allowed", 403)
     # Per-request latency tracing to distinguish AP/network delays from handler time.
     request._blockvase_start = time.perf_counter()  # type: ignore[attr-defined]
@@ -553,8 +583,26 @@ def _set_admin_cookie(response, cfg: dict[str, Any]):
             max_age=ADMIN_COOKIE_MAX_AGE,
             httponly=True,
             samesite="Strict",
+            # Portal is HTTP by design; Secure only when already on HTTPS (e.g. reverse proxy).
+            secure=bool(request.is_secure),
         )
     return response
+
+
+def _require_step_up_password(cfg: dict[str, Any], body: dict[str, Any] | None = None):
+    """Re-check admin password (+ TOTP when enabled) for high-risk wallet actions."""
+    body = body or {}
+    username = str(body.get("username", "") or "").strip()
+    password = str(body.get("password", "") or "")
+    if not _has_admin_credentials(cfg):
+        return _json_err("Admin credentials are not configured", 403)
+    if not _is_admin_password_valid(cfg, username, password):
+        return _json_err("Invalid username or password", 403)
+    if _totp_enabled(cfg):
+        code = str(body.get("totp_code", "") or body.get("code", "") or "").strip()
+        if not verify_totp(_totp_secret(cfg), code):
+            return _json_err("Invalid authenticator code", 403)
+    return None
 
 
 def _ap_password(cfg: dict[str, Any]) -> str:
@@ -687,31 +735,107 @@ def _apply_mining_payout_address(
 
 
 def _ensure_node_mining_payout(cfg: dict[str, Any] | None = None) -> str | None:
-    """If no payout is configured, generate one from the local Knots wallet and apply it.
+    """Ensure a node payout address exists in the portal spend wallet.
+
+    - Empty payout → generate spend-wallet address.
+    - Legacy mining-wallet payout (pre-split) → migrate to a spend address.
+    - Custom / already-spend address → leave unchanged (never overwrite custom).
+    - Classify failure (`unknown`) → no-op (do not mint).
+
+    Prefers the on-disk DATUM payout file, then config. Persist a newly minted
+    spend address into config *before* applying so a failed apply does not remint
+    on the next sync tick.
 
     Wallet address creation is IBD-safe. set-mining-payout.sh defers DATUM until the
     node is synced enough for block templates.
     """
-    cfg = cfg or load_config()
-    existing = _current_mining_payout_address(cfg).strip()
-    if existing:
-        return existing
-    try:
-        address = new_mining_payout_address(state.rpc, cfg.get("rpc") or {})
-    except Exception as ex:
-        _log.warning("could not generate mining payout from node wallet: %s", ex)
-        return None
-    resp = _apply_mining_payout_address(
-        cfg,
-        address,
-        source="node",
-        message=None,  # filled below with IBD-aware text when possible
-    )
-    # Error responses are (Response, status) tuples from _json_err.
-    if isinstance(resp, tuple):
-        _log.warning("failed to apply node mining payout for %s", address)
-        return None
-    return address
+    with _mining_payout_ensure_lock:
+        cfg = load_config()
+        rpc_cfg = cfg.get("rpc") or {}
+        file_addr = ""
+        try:
+            file_addr = MINING_PAYOUT_PATH.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+        cfg_addr = str(cfg.get("mining_payout_address", "") or "").strip()
+
+        def _classify(addr: str) -> str:
+            if not addr:
+                return "empty"
+            try:
+                if address_is_spend_mine(state.rpc, rpc_cfg, addr):
+                    return "spend"
+                if address_is_legacy_mining_mine(state.rpc, rpc_cfg, addr):
+                    return "legacy"
+            except Exception:
+                return "unknown"
+            return "custom"
+
+        def _apply(address: str, *, source: str) -> str | None:
+            with app.app_context():
+                resp = _apply_mining_payout_address(
+                    cfg, address, source=source, message=None
+                )
+            if isinstance(resp, tuple):
+                _log.warning("failed to apply node mining payout for %s", address)
+                return None
+            return address
+
+        file_kind = _classify(file_addr)
+        cfg_kind = _classify(cfg_addr)
+
+        if file_kind == "spend":
+            return file_addr
+        if file_kind == "custom":
+            return file_addr
+        if file_kind == "unknown":
+            # RPC glitch — do not rotate payouts.
+            return file_addr or cfg_addr or None
+
+        # Preserve custom config addresses (push to file if needed; never mint over them).
+        if cfg_kind == "custom":
+            if file_kind in {"empty", "legacy"}:
+                return _apply(cfg_addr, source="custom") or cfg_addr
+            return cfg_addr
+        if cfg_kind == "unknown":
+            return file_addr or cfg_addr or None
+
+        # Reuse spend address already in config (covers failed-apply remint case).
+        if cfg_kind == "spend":
+            if file_addr == cfg_addr:
+                return cfg_addr
+            if file_kind == "legacy":
+                _log.info(
+                    "re-applying spend-wallet payout from config (file still legacy %s…)",
+                    file_addr[:12],
+                )
+            elif file_kind == "empty":
+                _log.info("applying spend-wallet payout from config (payout file empty)")
+            return _apply(cfg_addr, source="node") or cfg_addr
+
+        # Mint only when file is legacy, or both sides are empty/legacy.
+        should_mint = file_kind == "legacy" or (
+            file_kind == "empty" and cfg_kind in {"empty", "legacy"}
+        )
+        if not should_mint:
+            return file_addr or cfg_addr or None
+
+        if file_kind == "legacy":
+            _log.info(
+                "migrating legacy mining-wallet payout %s… to portal spend wallet",
+                file_addr[:12],
+            )
+        try:
+            address = new_mining_payout_address(state.rpc, rpc_cfg)
+        except Exception as ex:
+            _log.warning("could not generate mining payout from spend wallet: %s", ex)
+            return file_addr or cfg_addr or None
+
+        # Persist before privileged apply so retries do not mint endlessly.
+        cfg["mining_payout_address"] = address
+        cfg["mining_payout_source"] = "node"
+        save_config(cfg)
+        return _apply(address, source="node") or address
 
 
 def _mining_status_fields(cfg: dict[str, Any], address: str) -> dict[str, Any]:
@@ -792,11 +916,8 @@ def _start_mining_sync_thread() -> None:
         while True:
             try:
                 cfg = load_config()
-                if (
-                    _is_setup_complete(cfg)
-                    and not _is_wifi_recovery(cfg)
-                    and not _current_mining_payout_address(cfg).strip()
-                ):
+                if _is_setup_complete(cfg) and not _is_wifi_recovery(cfg):
+                    # Empty payout → create; legacy mining-wallet payout → migrate to spend.
                     _ensure_node_mining_payout(cfg)
                 _ensure_datum_when_synced()
             except Exception as ex:
@@ -1134,12 +1255,18 @@ def get_mining_payout():
     if token_err:
         return token_err
     address = _current_mining_payout_address(cfg)
-    # Do not block Settings on wallet/DATUM work during IBD — kick a background attempt.
-    if (
-        not address
-        and _is_setup_complete(cfg)
-        and not _is_wifi_recovery(cfg)
-    ):
+    # Do not block Settings on wallet/DATUM work during IBD — kick a background attempt
+    # for empty payout or legacy mining-wallet → spend-wallet migration.
+    needs_ensure = not bool(address.strip())
+    if address.strip() and _is_setup_complete(cfg) and not _is_wifi_recovery(cfg):
+        try:
+            rpc_cfg = cfg.get("rpc") or {}
+            needs_ensure = address_is_legacy_mining_mine(
+                state.rpc, rpc_cfg, address
+            ) and not address_is_spend_mine(state.rpc, rpc_cfg, address)
+        except Exception:
+            needs_ensure = False
+    if needs_ensure and _is_setup_complete(cfg) and not _is_wifi_recovery(cfg):
         threading.Thread(
             target=_ensure_node_mining_payout,
             kwargs={"cfg": cfg},
@@ -1187,58 +1314,70 @@ def set_mining_payout():
 
 @app.post("/api/mining-payout/generate")
 def generate_mining_payout():
-    """Create a fresh receive address in the local Knots wallet and apply it as payout."""
+    """Create a fresh receive address in the portal spend wallet and apply it as payout."""
     body = request.get_json(force=True, silent=True) or {}
     cfg = load_config()
     token_err = _require_admin_token(cfg, body)
     if token_err:
         return token_err
-    try:
-        # Works during IBD — only needs wallet RPC, not a synced tip.
-        address = new_mining_payout_address(state.rpc, cfg.get("rpc") or {})
-    except Exception as ex:
-        _log.exception("generate mining payout failed")
-        return _json_err(f"Could not generate address from this node: {ex}", 500)
-    sync = node_sync_status(state.rpc, cfg.get("rpc") or {})
-    msg = "Generated a new payout address from this node’s wallet and applied it."
-    if sync.get("initialblockdownload"):
-        msg = (
-            "Generated a payout address from this node’s wallet. "
-            "The node is still syncing (IBD); solo hashing starts when sync finishes."
+    with _mining_payout_ensure_lock:
+        try:
+            # Works during IBD — only needs wallet RPC, not a synced tip.
+            address = new_mining_payout_address(state.rpc, cfg.get("rpc") or {})
+        except Exception as ex:
+            _log.exception("generate mining payout failed")
+            return _json_err(f"Could not generate address from this node: {ex}", 500)
+        # Persist before apply so a failed helper does not remint on the next ensure tick.
+        cfg = load_config()
+        cfg["mining_payout_address"] = address
+        cfg["mining_payout_source"] = "node"
+        save_config(cfg)
+        sync = node_sync_status(state.rpc, cfg.get("rpc") or {})
+        msg = "Generated a new payout address from this node’s wallet and applied it."
+        if sync.get("initialblockdownload"):
+            msg = (
+                "Generated a payout address from this node’s wallet. "
+                "The node is still syncing (IBD); solo hashing starts when sync finishes."
+            )
+        resp = _apply_mining_payout_address(cfg, address, source="node", message=msg)
+        if isinstance(resp, tuple):
+            return resp
+        sync_fields = _mining_status_fields(load_config(), address)
+        data = resp.get_json() if hasattr(resp, "get_json") else {}
+        if not isinstance(data, dict):
+            data = {}
+        return _json_ok(
+            applied=bool(data.get("applied", True)),
+            message=data.get("message") or msg,
+            **{k: sync_fields[k] for k in sync_fields},
         )
-    resp = _apply_mining_payout_address(cfg, address, source="node", message=msg)
-    if isinstance(resp, tuple):
-        return resp
-    sync_fields = _mining_status_fields(load_config(), address)
-    data = resp.get_json() if hasattr(resp, "get_json") else {}
-    if not isinstance(data, dict):
-        data = {}
-    return _json_ok(
-        applied=bool(data.get("applied", True)),
-        message=data.get("message") or msg,
-        **{k: sync_fields[k] for k in sync_fields},
-    )
 
 
 def _wallet_snapshot(cfg: dict[str, Any], *, receive_address: str | None = None) -> dict[str, Any]:
+    """Spend-wallet snapshot. Does not mint addresses — pass receive_address from /receive."""
     rpc_cfg = cfg.get("rpc") or {}
     sync = node_sync_status(state.rpc, rpc_cfg)
-    balances = wallet_balances(state.rpc, rpc_cfg)
-    address = (receive_address or "").strip()
-    if not address:
-        # Fresh address on each wallet page load (unused gap addresses are fine).
-        address = new_mining_payout_address(state.rpc, rpc_cfg)
-    txs = wallet_recent_transactions(state.rpc, rpc_cfg, count=15)
+    balances = spend_wallet_balances(state.rpc, rpc_cfg)
+    txs = spend_wallet_recent_transactions(state.rpc, rpc_cfg, count=15)
+    legacy = legacy_mining_wallet_balances(state.rpc, rpc_cfg)
+    legacy_total = (
+        Decimal(legacy.get("trusted") or "0")
+        + Decimal(legacy.get("untrusted_pending") or "0")
+        + Decimal(legacy.get("immature") or "0")
+    )
     return {
-        "receive_address": address,
-        "trusted": balances.get("trusted", 0.0),
-        "untrusted_pending": balances.get("untrusted_pending", 0.0),
-        "immature": balances.get("immature", 0.0),
+        "receive_address": (receive_address or "").strip(),
+        "trusted": balances.get("trusted", "0.00000000"),
+        "untrusted_pending": balances.get("untrusted_pending", "0.00000000"),
+        "immature": balances.get("immature", "0.00000000"),
         "transactions": txs,
         "initialblockdownload": bool(sync.get("initialblockdownload")),
         "mining_ready": bool(sync.get("ready")),
         "blocks": int(sync.get("blocks") or 0),
         "headers": int(sync.get("headers") or 0),
+        "totp_enabled": _totp_enabled(cfg),
+        "wallet_kind": "spend",
+        "legacy_mining_balance": format_btc_decimal(legacy_total) if legacy_total > 0 else "",
     }
 
 
@@ -1262,7 +1401,7 @@ def wallet_new_receive():
     if token_err:
         return token_err
     try:
-        address = new_mining_payout_address(state.rpc, cfg.get("rpc") or {})
+        address = new_spend_receive_address(state.rpc, cfg.get("rpc") or {})
         snap = _wallet_snapshot(cfg, receive_address=address)
         return _json_ok(**snap)
     except Exception as ex:
@@ -1277,8 +1416,12 @@ def wallet_receive_qr():
     if token_err:
         return token_err
     address = str(request.args.get("address", "") or "").strip()
-    if not address or not validate_bitcoin_address(state.rpc, cfg.get("rpc") or {}, address):
+    rpc_cfg = cfg.get("rpc") or {}
+    if not address or not validate_bitcoin_address(state.rpc, rpc_cfg, address):
         return _json_err("Valid address required", 400)
+    # Only emit QRs for addresses we control (blocks phishing via arbitrary QR).
+    if not address_is_spend_mine(state.rpc, rpc_cfg, address):
+        return _json_err("Address is not from this device’s wallet", 400)
     payload = f"bitcoin:{address}"
     img = qrcode.make(payload, image_factory=SvgImage)
     buf = BytesIO()
@@ -1296,11 +1439,14 @@ def wallet_send():
     token_err = _require_admin_token(cfg, body)
     if token_err:
         return token_err
+    step_err = _require_step_up_password(cfg, body)
+    if step_err:
+        return step_err
     address = str(body.get("address", "") or "").strip()
     try:
-        amount = float(body.get("amount"))
-    except (TypeError, ValueError):
-        return _json_err("Amount must be a number (BTC).")
+        amount = parse_btc_amount(body.get("amount"))
+    except RuntimeError as ex:
+        return _json_err(str(ex), 400)
     subtract = bool(body.get("subtract_fee_from_amount"))
     sync = node_sync_status(state.rpc, cfg.get("rpc") or {})
     if sync.get("initialblockdownload"):
@@ -1309,7 +1455,7 @@ def wallet_send():
             400,
         )
     try:
-        txid = send_from_wallet(
+        txid = send_from_spend_wallet(
             state.rpc,
             cfg.get("rpc") or {},
             address=address,
@@ -1320,6 +1466,33 @@ def wallet_send():
         _log.exception("wallet send failed")
         return _json_err(str(ex), 400)
     return _json_ok(txid=txid, message="Transaction broadcast.")
+
+
+@app.post("/api/wallet/backup")
+def wallet_backup():
+    body = request.get_json(force=True, silent=True) or {}
+    cfg = load_config()
+    token_err = _require_admin_token(cfg, body)
+    if token_err:
+        return token_err
+    step_err = _require_step_up_password(cfg, body)
+    if step_err:
+        return step_err
+    try:
+        text = export_spend_wallet_descriptors(state.rpc, cfg.get("rpc") or {})
+    except Exception as ex:
+        _log.exception("wallet backup failed")
+        return _json_err(f"Could not export wallet backup: {ex}", 500)
+    response = _json_ok(
+        backup=text,
+        warning=(
+            "This backup can spend all funds in the portal spend wallet. "
+            "Store it offline and never share it. This includes keys for default "
+            "node mining payout addresses in the same wallet."
+        ),
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/api/display-offset")

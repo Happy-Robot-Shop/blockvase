@@ -1,4 +1,9 @@
 const setupToken = new URLSearchParams(window.location.search).get("token") || "";
+let totpEnabled = false;
+let receiveMintedThisOpen = false;
+let receiveMintPromise = null;
+let sendInFlight = false;
+let backupInFlight = false;
 
 function withToken(path) {
   if (!setupToken) return path;
@@ -59,10 +64,45 @@ function formatDeviceName(name) {
     .join(" ");
 }
 
-function formatBtc(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return "—";
-  return v.toFixed(8) + " BTC";
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Format BTC from a decimal string (or number) without relying on float math for display. */
+function formatBtc(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s || !/^-?\d+(\.\d+)?$/.test(s)) return "—";
+  const neg = s.startsWith("-");
+  const body = neg ? s.slice(1) : s;
+  const parts = body.split(".");
+  const whole = parts[0] || "0";
+  let frac = (parts[1] || "").slice(0, 8);
+  while (frac.length < 8) frac += "0";
+  return (neg ? "-" : "") + whole + "." + frac + " BTC";
+}
+
+function isValidBtcAmountString(raw) {
+  const s = String(raw ?? "").trim();
+  return /^\d+(\.\d{1,8})?$/.test(s) && s !== "0" && !/^0+$/.test(s) && s !== "0.0" && !/^0\.0+$/.test(s);
+}
+
+function setTotpUi(enabled) {
+  totpEnabled = !!enabled;
+  const sendWrap = document.getElementById("walletSendTotpWrap");
+  const backupWrap = document.getElementById("walletBackupTotpWrap");
+  const hint = document.getElementById("walletSendTotpHint");
+  if (sendWrap) sendWrap.style.display = totpEnabled ? "block" : "none";
+  if (backupWrap) backupWrap.style.display = totpEnabled ? "block" : "none";
+  if (hint) hint.style.display = totpEnabled ? "inline" : "none";
+  const sendTotp = document.getElementById("walletSendTotp");
+  const backupTotp = document.getElementById("walletBackupTotp");
+  if (sendTotp) sendTotp.required = totpEnabled;
+  if (backupTotp) backupTotp.required = totpEnabled;
 }
 
 function setWalletVisible(visible) {
@@ -80,7 +120,13 @@ async function requireWalletAccess() {
   try {
     const r = await fetch("/api/admin-auth/status");
     const d = await r.json();
+    setTotpUi(!!d.totp_enabled);
     if (d.authenticated) {
+      const user = d.username || "";
+      const sendUser = document.getElementById("walletSendUsername");
+      const backupUser = document.getElementById("walletBackupUsername");
+      if (sendUser && user) sendUser.value = user;
+      if (backupUser && user) backupUser.value = user;
       setWalletVisible(true);
       return true;
     }
@@ -103,9 +149,20 @@ function loginAdmin(e) {
   const passwordStep = document.getElementById("adminLoginPasswordStep");
   const pendingEl = document.getElementById("adminLoginPendingToken");
 
+  function fillStepUpUsername(name) {
+    const sendUser = document.getElementById("walletSendUsername");
+    const backupUser = document.getElementById("walletBackupUsername");
+    if (sendUser && name) sendUser.value = name;
+    if (backupUser && name) backupUser.value = name;
+  }
+
   if (totpStep && totpStep.style.display !== "none") {
     const code = document.getElementById("adminLoginTotpCode")?.value || "";
     const pending = pendingEl?.value || "";
+    const username =
+      document.getElementById("adminLoginUsername")?.value ||
+      pendingEl?.dataset?.username ||
+      "";
     fetch("/api/admin-auth/login/2fa", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -114,6 +171,7 @@ function loginAdmin(e) {
       .then((r) => parseJsonResponse(r))
       .then((d) => {
         if (d.success) {
+          fillStepUpUsername(username);
           setWalletVisible(true);
           loadWallet();
         } else {
@@ -134,13 +192,17 @@ function loginAdmin(e) {
     .then((r) => parseJsonResponse(r))
     .then((d) => {
       if (d.success && d.needs_2fa) {
-        if (pendingEl) pendingEl.value = d.pending_token || "";
+        if (pendingEl) {
+          pendingEl.value = d.pending_token || "";
+          pendingEl.dataset.username = username;
+        }
         if (passwordStep) passwordStep.style.display = "none";
         if (totpStep) totpStep.style.display = "block";
         showStatus(status, "info", d.message || "Enter authenticator code");
         return;
       }
       if (d.success) {
+        fillStepUpUsername(username);
         setWalletVisible(true);
         loadWallet();
       } else {
@@ -159,27 +221,28 @@ function renderTransactions(rows) {
   }
   el.innerHTML = rows
     .map((tx) => {
-      const sign = Number(tx.amount) >= 0 ? "+" : "";
+      const amountStr = String(tx.amount ?? "");
+      const sign = amountStr.startsWith("-") ? "" : "+";
       const conf =
         tx.confirmations > 0 ? tx.confirmations + " conf" : "unconfirmed";
       const when = tx.time
         ? new Date(tx.time * 1000).toLocaleString()
         : "";
+      const txidShort = tx.txid ? String(tx.txid).slice(0, 12) + "…" : "";
       return (
         '<div class="wallet-tx-row">' +
         '<div class="wallet-tx-main">' +
         '<span class="wallet-tx-cat">' +
-        (tx.category || "tx") +
+        escapeHtml(tx.category || "tx") +
         "</span> " +
         '<span class="portal-kpi-value--mono">' +
-        sign +
-        formatBtc(tx.amount) +
+        escapeHtml(sign + formatBtc(amountStr)) +
         "</span>" +
         "</div>" +
         '<div class="wallet-tx-meta muted-note muted-note--compact">' +
-        conf +
-        (when ? " · " + when : "") +
-        (tx.txid ? " · " + String(tx.txid).slice(0, 12) + "…" : "") +
+        escapeHtml(conf) +
+        (when ? " · " + escapeHtml(when) : "") +
+        (txidShort ? " · " + escapeHtml(txidShort) : "") +
         "</div></div>"
       );
     })
@@ -187,6 +250,8 @@ function renderTransactions(rows) {
 }
 
 function applyWalletPayload(d) {
+  if (typeof d.totp_enabled === "boolean") setTotpUi(d.totp_enabled);
+
   const setText = (id, v) => {
     const el = document.getElementById(id);
     if (el) el.textContent = v;
@@ -207,10 +272,22 @@ function applyWalletPayload(d) {
 
   const syncNote = document.getElementById("walletSyncNote");
   if (syncNote) {
+    const notes = [];
     if (d.initialblockdownload) {
+      notes.push(
+        "Node is still syncing (IBD). You can receive anytime; sending may fail until the tip is caught up."
+      );
+    }
+    if (d.legacy_mining_balance) {
+      notes.push(
+        "A previous mining wallet on this device still holds " +
+          formatBtc(d.legacy_mining_balance) +
+          ". New rewards use this portal wallet; move legacy funds with bitcoin-cli if needed."
+      );
+    }
+    if (notes.length) {
       syncNote.style.display = "block";
-      syncNote.textContent =
-        "Node is still syncing (IBD). You can receive anytime; sending may fail until the tip is caught up.";
+      syncNote.textContent = notes.join(" ");
     } else {
       syncNote.style.display = "none";
       syncNote.textContent = "";
@@ -219,17 +296,50 @@ function applyWalletPayload(d) {
   renderTransactions(d.transactions || []);
 }
 
+function mintReceiveAddress(forceNew) {
+  const status = document.getElementById("walletReceiveStatus");
+  // Coalesce concurrent auto-mints (e.g. loadWallet after send while first mint runs).
+  // Forced "New address" waits for any in-flight mint, then requests another.
+  if (receiveMintPromise) {
+    if (!forceNew) return receiveMintPromise;
+    return receiveMintPromise.catch(() => null).then(() => mintReceiveAddress(true));
+  }
+  receiveMintPromise = fetch(withToken("/api/wallet/receive"), { method: "POST" })
+    .then((r) => parseJsonResponse(r))
+    .then((d) => {
+      if (!d.success && d.error) {
+        throw new Error(d.error);
+      }
+      receiveMintedThisOpen = true;
+      applyWalletPayload(d);
+      return d;
+    })
+    .catch((err) => {
+      showStatus(status, "error", err.message);
+      throw err;
+    })
+    .finally(() => {
+      receiveMintPromise = null;
+    });
+  return receiveMintPromise;
+}
+
 function loadWallet() {
   showLoading("Loading wallet...");
   fetch(withToken("/api/wallet"))
     .then((r) => parseJsonResponse(r))
     .then((d) => {
-      hideLoading();
-      if (d.error && !d.receive_address) {
+      if (d.error && d.success === false) {
+        hideLoading();
         showStatus(document.getElementById("walletStatus"), "error", d.error);
-        return;
+        return null;
       }
       applyWalletPayload(d);
+      if (!receiveMintedThisOpen) {
+        return mintReceiveAddress(false).finally(hideLoading);
+      }
+      hideLoading();
+      return d;
     })
     .catch((err) => {
       hideLoading();
@@ -254,70 +364,171 @@ function copyReceiveAddress() {
 function newReceiveAddress() {
   const status = document.getElementById("walletReceiveStatus");
   showLoading("Generating address...");
-  fetch(withToken("/api/wallet/receive"), { method: "POST" })
-    .then((r) => parseJsonResponse(r))
-    .then((d) => {
+  mintReceiveAddress(true)
+    .then(() => {
       hideLoading();
-      if (!d.success) {
-        showStatus(status, "error", d.error || "Could not generate address");
-        return;
-      }
-      applyWalletPayload(d);
       showStatus(status, "success", "New receive address ready");
     })
-    .catch((err) => {
-      hideLoading();
-      showStatus(status, "error", err.message);
-    });
+    .catch(() => hideLoading());
+}
+
+function clearStepUpFields(prefix) {
+  const pw = document.getElementById(prefix + "Password");
+  const totp = document.getElementById(prefix + "Totp");
+  if (pw) pw.value = "";
+  if (totp) totp.value = "";
 }
 
 function sendBitcoin(e) {
   e.preventDefault();
+  if (sendInFlight) return;
   const status = document.getElementById("walletSendStatus");
+  const form = document.getElementById("walletSendForm");
   const address = document.getElementById("walletSendAddress")?.value.trim() || "";
   const amountRaw = document.getElementById("walletSendAmount")?.value.trim() || "";
   const subtract = !!document.getElementById("walletSubtractFee")?.checked;
-  const amount = Number(amountRaw);
+  const username = document.getElementById("walletSendUsername")?.value.trim() || "";
+  const password = document.getElementById("walletSendPassword")?.value || "";
+  const totp_code = document.getElementById("walletSendTotp")?.value.trim() || "";
   if (!address) {
     showStatus(status, "error", "Destination address is required");
     return;
   }
-  if (!Number.isFinite(amount) || amount <= 0) {
-    showStatus(status, "error", "Enter a valid BTC amount");
+  if (!isValidBtcAmountString(amountRaw)) {
+    showStatus(status, "error", "Enter a valid BTC amount (up to 8 decimals)");
+    return;
+  }
+  if (!username || !password) {
+    showStatus(status, "error", "Re-enter admin username and password to send");
+    return;
+  }
+  if (totpEnabled && !totp_code) {
+    showStatus(status, "error", "Authenticator code is required");
     return;
   }
   if (
     !window.confirm(
-      "Send " + amount.toFixed(8) + " BTC to\n" + address + "\n\nThis cannot be undone."
+      "Send " + formatBtc(amountRaw) + " to\n" + address + "\n\nThis cannot be undone."
     )
   ) {
     return;
   }
+  sendInFlight = true;
+  if (form) form.querySelectorAll("button,input").forEach((el) => { el.disabled = true; });
   showLoading("Broadcasting transaction...");
   fetch(withToken("/api/wallet/send"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       address,
-      amount,
+      amount: amountRaw,
       subtract_fee_from_amount: subtract,
+      username,
+      password,
+      totp_code,
     }),
   })
     .then((r) => parseJsonResponse(r))
     .then((d) => {
       hideLoading();
+      clearStepUpFields("walletSend");
       if (!d.success) {
         showStatus(status, "error", d.error || "Send failed");
         return;
       }
-      showStatus(status, "success", "Sent. Txid: " + (d.txid || "").slice(0, 18) + "…");
+      showStatus(status, "success", "Sent. Txid: " + String(d.txid || "").slice(0, 18) + "…");
       document.getElementById("walletSendAddress").value = "";
       document.getElementById("walletSendAmount").value = "";
       loadWallet();
     })
     .catch((err) => {
       hideLoading();
+      clearStepUpFields("walletSend");
       showStatus(status, "error", err.message);
+    })
+    .finally(() => {
+      sendInFlight = false;
+      if (form) {
+        form.querySelectorAll("button,input").forEach((el) => {
+          // Keep receive-style readonly fields alone; restore editable controls.
+          if (el.id === "walletSendTotp" && !totpEnabled) return;
+          el.disabled = false;
+        });
+        const totp = document.getElementById("walletSendTotp");
+        if (totp) totp.required = totpEnabled;
+      }
+    });
+}
+
+function exportBackup(e) {
+  e.preventDefault();
+  if (backupInFlight) return;
+  const status = document.getElementById("walletBackupStatus");
+  const out = document.getElementById("walletBackupOutput");
+  const form = document.getElementById("walletBackupForm");
+  const username = document.getElementById("walletBackupUsername")?.value.trim() || "";
+  const password = document.getElementById("walletBackupPassword")?.value || "";
+  const totp_code = document.getElementById("walletBackupTotp")?.value.trim() || "";
+  if (!username || !password) {
+    showStatus(status, "error", "Re-enter admin username and password to export");
+    return;
+  }
+  if (totpEnabled && !totp_code) {
+    showStatus(status, "error", "Authenticator code is required");
+    return;
+  }
+  // Never leave private descriptors sitting in the DOM.
+  if (out) {
+    out.hidden = true;
+    out.style.display = "none";
+    out.textContent = "";
+  }
+  backupInFlight = true;
+  if (form) form.querySelectorAll("button,input").forEach((el) => { el.disabled = true; });
+  showLoading("Exporting backup...");
+  fetch(withToken("/api/wallet/backup"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password, totp_code }),
+  })
+    .then((r) => parseJsonResponse(r))
+    .then((d) => {
+      hideLoading();
+      clearStepUpFields("walletBackup");
+      if (!d.success) {
+        showStatus(status, "error", d.error || "Backup failed");
+        return;
+      }
+      const text = d.backup || "";
+      const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "blockvase-spend-wallet-backup.txt";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showStatus(
+        status,
+        "success",
+        d.warning || "Backup downloaded. Store it offline and keep it secret."
+      );
+    })
+    .catch((err) => {
+      hideLoading();
+      clearStepUpFields("walletBackup");
+      showStatus(status, "error", err.message);
+    })
+    .finally(() => {
+      backupInFlight = false;
+      if (form) {
+        form.querySelectorAll("button,input").forEach((el) => {
+          el.disabled = false;
+        });
+        const totp = document.getElementById("walletBackupTotp");
+        if (totp) totp.required = totpEnabled;
+      }
     });
 }
 
@@ -342,6 +553,7 @@ document.getElementById("adminLoginTotpCancel")?.addEventListener("click", () =>
 document.getElementById("walletCopyAddressBtn")?.addEventListener("click", copyReceiveAddress);
 document.getElementById("walletNewAddressBtn")?.addEventListener("click", newReceiveAddress);
 document.getElementById("walletSendForm")?.addEventListener("submit", sendBitcoin);
+document.getElementById("walletBackupForm")?.addEventListener("submit", exportBackup);
 
 loadDeviceName();
 requireWalletAccess().then((ok) => {

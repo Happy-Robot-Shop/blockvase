@@ -190,8 +190,9 @@
         <h2 class="metric-board-title">Solo Mining</h2>
         <p class="muted-note">
           Blocks found by the local DATUM Gateway pay this Bitcoin address in the coinbase.
-          By default Blockvase uses an address from this device’s Knots wallet (created even during IBD);
-          hashing waits until the node finishes syncing. You can paste a different address anytime.
+          By default Blockvase uses an address from this device’s portal wallet (same wallet as
+          <a href="/wallet">/wallet</a>, created even during IBD); hashing waits until the node finishes syncing.
+          Paste a different address anytime to pay somewhere else.
         </p>
 
         <div id="miningPayoutStatus" class="status info" style="display:none;"></div>
@@ -203,7 +204,7 @@
             <label for="miningPayoutAddress">Bitcoin payout address</label>
             <input id="miningPayoutAddress" type="text" inputmode="text" spellcheck="false" placeholder="bc1..." autocomplete="off" />
             <div class="muted-note muted-note--compact btn-spaced">
-              Saving updates DATUM and restarts mining. Node-wallet keys stay on this device — back up the wallet if you use a generated address.
+              Saving updates DATUM and restarts mining. Generated addresses use the portal wallet — export a backup from /wallet.
             </div>
             <button class="btn secondary btn-spaced" type="submit">Save payout address</button>
             <button class="btn secondary btn-spaced" type="button" id="miningPayoutGenerateBtn">Generate from this node</button>

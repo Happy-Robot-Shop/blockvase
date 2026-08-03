@@ -386,7 +386,7 @@ function setMiningPayoutSourceNote(d) {
   note.style.display = "block";
   let text =
     source === "node"
-      ? "Currently using an address from this device’s Bitcoin Knots wallet."
+      ? "Currently using an address from this device’s portal wallet (/wallet)."
       : "Currently using a custom address (not from this device’s wallet).";
   if (d.initialblockdownload || d.mining_ready === false) {
     text +=
@@ -394,6 +394,9 @@ function setMiningPayoutSourceNote(d) {
   }
   note.textContent = text;
 }
+
+let miningPayoutLoadAttempts = 0;
+let miningPayoutInFlight = false;
 
 function loadMiningPayout() {
   fetch(withToken("/api/mining-payout"))
@@ -403,8 +406,10 @@ function loadMiningPayout() {
       if (input) {
         if (d.address) {
           input.value = d.address;
-        } else if (!input.value) {
+          miningPayoutLoadAttempts = 0;
+        } else if (!input.value && miningPayoutLoadAttempts < 12) {
           // Background generation may still be running after first setup.
+          miningPayoutLoadAttempts += 1;
           setTimeout(loadMiningPayout, 2500);
         }
       }
@@ -415,14 +420,18 @@ function loadMiningPayout() {
 
 function saveMiningPayout(e) {
   e.preventDefault();
+  if (miningPayoutInFlight) return;
   const input = document.getElementById("miningPayoutAddress");
   const statusDiv = document.getElementById("miningPayoutStatus");
+  const form = document.getElementById("miningPayoutForm");
   if (!input) return;
   const address = input.value.trim();
   if (!address) {
     showStatus(statusDiv, "error", "Bitcoin payout address is required");
     return;
   }
+  miningPayoutInFlight = true;
+  if (form) form.querySelectorAll("button,input").forEach((el) => { el.disabled = true; });
   showLoading("Saving mining payout address...");
   showStatus(statusDiv, "info", "Saving mining payout address...");
   const payload = { address };
@@ -446,12 +455,20 @@ function saveMiningPayout(e) {
     .catch(err => {
       hideLoading();
       showStatus(statusDiv, "error", "Error: " + err.message);
+    })
+    .finally(() => {
+      miningPayoutInFlight = false;
+      if (form) form.querySelectorAll("button,input").forEach((el) => { el.disabled = false; });
     });
 }
 
 function generateMiningPayout() {
+  if (miningPayoutInFlight) return;
   const input = document.getElementById("miningPayoutAddress");
   const statusDiv = document.getElementById("miningPayoutStatus");
+  const form = document.getElementById("miningPayoutForm");
+  miningPayoutInFlight = true;
+  if (form) form.querySelectorAll("button,input").forEach((el) => { el.disabled = true; });
   showLoading("Generating address from this node...");
   showStatus(
     statusDiv,
@@ -479,6 +496,10 @@ function generateMiningPayout() {
     .catch(err => {
       hideLoading();
       showStatus(statusDiv, "error", "Error: " + err.message);
+    })
+    .finally(() => {
+      miningPayoutInFlight = false;
+      if (form) form.querySelectorAll("button,input").forEach((el) => { el.disabled = false; });
     });
 }
 

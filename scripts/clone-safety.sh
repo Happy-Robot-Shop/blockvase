@@ -381,12 +381,15 @@ clear_mining_runtime() {
   else
     rm -f /etc/blockvase/datum_gateway_config.json
   fi
-  # Never ship the same mining wallet keys to every clone.
+  # Never ship the same mining/spend wallet keys to every clone.
   if command -v bitcoin-cli >/dev/null 2>&1 && [[ -f /etc/bitcoin/bitcoin.conf ]]; then
     bitcoin-cli -conf=/etc/bitcoin/bitcoin.conf -datadir=/var/lib/bitcoind \
       unloadwallet blockvase >/dev/null 2>&1 || true
+    bitcoin-cli -conf=/etc/bitcoin/bitcoin.conf -datadir=/var/lib/bitcoind \
+      unloadwallet blockvase-spend >/dev/null 2>&1 || true
   fi
   rm -rf /var/lib/bitcoind/wallets/blockvase 2>/dev/null || true
+  rm -rf /var/lib/bitcoind/wallets/blockvase-spend 2>/dev/null || true
   if [[ -x "${PROJECT_DIR}/scripts/blockvase-miner-refresh-env.sh" ]]; then
     BLOCKVASE_SERVICE_USER=blockvase "${PROJECT_DIR}/scripts/blockvase-miner-refresh-env.sh" || true
   fi

@@ -52,7 +52,11 @@
       <div class="settings-sections" id="walletSections" style="display:none;">
         <div class="settings-card metric-board metric-board--dense">
           <h2 class="metric-board-title">Balance</h2>
-          <p class="muted-note">Funds in this device’s Bitcoin Knots wallet (same wallet used for mining payouts).</p>
+          <p class="muted-note">
+            On-device wallet for receive, send, and (by default) solo-mining rewards.
+            Override the payout destination anytime under
+            <a href="/settings">Settings → Solo Mining</a>.
+          </p>
           <div id="walletStatus" class="status info" style="display:none;"></div>
           <div class="portal-kpi-strip portal-kpi-strip--in-board" aria-label="Wallet balance">
             <div class="portal-kpi">
@@ -75,7 +79,7 @@
           <div class="settings-config-main">
             <div class="settings-card metric-board metric-board--dense">
               <h2 class="metric-board-title">Receive</h2>
-              <p class="muted-note">Share this address to receive bitcoin to the node on this device.</p>
+              <p class="muted-note">Share this address to receive bitcoin into the portal spend wallet.</p>
               <div id="walletReceiveStatus" class="status info" style="display:none;"></div>
               <div class="wallet-receive-layout">
                 <img id="walletReceiveQr" class="wallet-receive-qr" alt="Receive address QR code" width="180" height="180" />
@@ -92,7 +96,11 @@
 
             <div class="settings-card metric-board metric-board--dense">
               <h2 class="metric-board-title">Send</h2>
-              <p class="muted-note">Spend from this device’s wallet. Double-check the destination address.</p>
+              <p class="muted-note">
+                Spend from the portal wallet. Re-enter your admin password
+                <span id="walletSendTotpHint" style="display:none;">and authenticator code</span>
+                to confirm.
+              </p>
               <div id="walletSendStatus" class="status info" style="display:none;"></div>
               <form id="walletSendForm" autocomplete="off">
                 <label for="walletSendAddress">Destination address</label>
@@ -103,8 +111,38 @@
                   <input type="checkbox" id="walletSubtractFee" />
                   Subtract fee from amount
                 </label>
+                <label for="walletSendUsername">Admin username</label>
+                <input id="walletSendUsername" type="text" autocomplete="username" required />
+                <label for="walletSendPassword">Admin password</label>
+                <input id="walletSendPassword" type="password" autocomplete="current-password" data-password="true" required />
+                <div id="walletSendTotpWrap" style="display:none;">
+                  <label for="walletSendTotp">Authenticator code</label>
+                  <input id="walletSendTotp" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
+                </div>
                 <button class="btn btn-spaced" type="submit">Send bitcoin</button>
               </form>
+            </div>
+
+            <div class="settings-card metric-board metric-board--dense">
+              <h2 class="metric-board-title">Backup</h2>
+              <p class="muted-note">
+                Export private descriptors for this wallet. Anyone with this file can spend its funds
+                (including mining rewards paid to a default node address). Store it offline.
+              </p>
+              <div id="walletBackupStatus" class="status info" style="display:none;"></div>
+              <form id="walletBackupForm" autocomplete="off">
+                <label for="walletBackupUsername">Admin username</label>
+                <input id="walletBackupUsername" type="text" autocomplete="username" required />
+                <label for="walletBackupPassword">Admin password</label>
+                <input id="walletBackupPassword" type="password" autocomplete="current-password" data-password="true" required />
+                <div id="walletBackupTotpWrap" style="display:none;">
+                  <label for="walletBackupTotp">Authenticator code</label>
+                  <input id="walletBackupTotp" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
+                </div>
+                <button class="btn secondary btn-spaced" type="submit">Export descriptor backup</button>
+              </form>
+              <!-- Intentionally no on-page dump of private descriptors; download only. -->
+              <pre id="walletBackupOutput" class="wallet-backup-output" hidden style="display:none;" aria-hidden="true"></pre>
             </div>
           </div>
 

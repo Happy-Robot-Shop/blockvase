@@ -2355,6 +2355,18 @@ body.portal-page.wallet-page .wallet-tx-cat {
  font-weight: 650;
 }
 
+body.portal-page.wallet-page .wallet-backup-output {
+ margin-top: var(--portal-space-2);
+ max-height: 220px;
+ overflow: auto;
+ white-space: pre-wrap;
+ word-break: break-all;
+ padding: var(--portal-space-2);
+ border: 1px solid rgba(247, 147, 26, 0.22);
+ border-radius: 8px;
+ background: rgba(0, 0, 0, 0.25);
+}
+
 body.portal-page.settings-page .settings-card > .metric-board-title {
  font-size: var(--portal-text-section);
  font-weight: 650;
