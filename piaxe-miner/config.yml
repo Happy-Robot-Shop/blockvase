@@ -12,10 +12,16 @@ piaxe:
   name: PiAxe
   chips: 1
   # Enclosure mode: max sustained hashrate with tighter thermal headroom.
-  # Open-air was ~55°C at 525 MHz; case soak needs a lower ceiling + slower ramp.
-  # 225 MHz reached ~77.5°C toward 78 trip (tripped twice already) — step down.
-  asic_frequency: 200
+  # asic_frequency is the max/target; thermal governor steps down before the
+  # hard trip when ambient rises, then climbs back when the board cools.
+  asic_frequency: 487.5
   max_board_temp_c: 78
+  thermal_governor_enabled: true
+  thermal_governor_min_mhz: 300
+  # Step down at/above throttle; climb back at/below recover (hysteresis).
+  thermal_governor_throttle_temp_c: 75
+  thermal_governor_recover_temp_c: 71
+  thermal_governor_step_interval_sec: 45
   asic_init_max_temp_c: 70
   asic_power_settle_sec: 3
   asic_power_retry_sec: 45

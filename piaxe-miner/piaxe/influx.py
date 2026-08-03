@@ -22,6 +22,9 @@ class Stats:
         # Lifetime average and time-smoothed EMA (GH/s); hashing_speed tracks EMA for display.
         self.hashing_speed_lifetime = 0.0
         self.hashing_speed_ema = 0.0
+        # Effective vs configured max clock (thermal governor may lower effective).
+        self.asic_frequency_mhz = 0.0
+        self.asic_frequency_target_mhz = 0.0
         self.invalid_shares = 0
         self.valid_shares = 0
         self.difficulty = 512
@@ -96,6 +99,8 @@ class Influx:
                     .field("vdomain3", float(self.stats.vdomain3 or 0.0)) \
                     .field("vdomain4", float(self.stats.vdomain4 or 0.0)) \
                     .field("hashing_speed", float(self.stats.hashing_speed)) \
+                    .field("asic_frequency_mhz", float(self.stats.asic_frequency_mhz or 0.0)) \
+                    .field("asic_frequency_target_mhz", float(self.stats.asic_frequency_target_mhz or 0.0)) \
                     .field("invalid_shares", int(self.stats.invalid_shares)) \
                     .field("valid_shares", int(self.stats.valid_shares)) \
                     .field("uptime", int(self.stats.uptime)) \

@@ -115,6 +115,30 @@ class BM1366Miner:
         board_cfg = self.config.get(self.miner, {})
         self.max_board_temp_c = float(board_cfg.get("max_board_temp_c", 70.0))
 
+        # Thermal frequency governor: throttle/recover around ambient swings.
+        self._current_asic_mhz = 0.0
+        self._asic_frequency_target_mhz = float(board_cfg.get("asic_frequency", 0.0) or 0.0)
+        self._thermal_gov_enabled = bool(board_cfg.get("thermal_governor_enabled", False))
+        self._thermal_gov_min_mhz = float(board_cfg.get("thermal_governor_min_mhz", 300.0))
+        self._thermal_gov_step_mhz = float(
+            board_cfg.get(
+                "thermal_governor_step_mhz",
+                board_cfg.get("frequency_ramp_step_mhz", 6.25),
+            )
+        )
+        throttle_default = self.max_board_temp_c - 3.0
+        self._thermal_gov_throttle_temp_c = float(
+            board_cfg.get("thermal_governor_throttle_temp_c", throttle_default)
+        )
+        recover_default = self._thermal_gov_throttle_temp_c - 4.0
+        self._thermal_gov_recover_temp_c = float(
+            board_cfg.get("thermal_governor_recover_temp_c", recover_default)
+        )
+        self._thermal_gov_step_interval_sec = float(
+            board_cfg.get("thermal_governor_step_interval_sec", 45.0)
+        )
+        self._thermal_gov_last_step_ts = 0.0
+
     def shutdown(self):
         # signal the threads to end
         self.stop_event.set()
@@ -297,6 +321,22 @@ class BM1366Miner:
                 )
                 print("Initialization successful.")
                 self.asic_initialized = True
+                self._asic_frequency_target_mhz = float(self.hardware.get_asic_frequency())
+                self._current_asic_mhz = self._asic_frequency_target_mhz
+                with self.stats.lock:
+                    self.stats.asic_frequency_mhz = self._current_asic_mhz
+                    self.stats.asic_frequency_target_mhz = self._asic_frequency_target_mhz
+                if self._thermal_gov_enabled:
+                    logging.info(
+                        "thermal governor enabled: target=%.2f MHz min=%.2f MHz "
+                        "throttle≥%.1f°C recover≤%.1f°C step=%.2f interval=%.0fs",
+                        self._asic_frequency_target_mhz,
+                        self._thermal_gov_min_mhz,
+                        self._thermal_gov_throttle_temp_c,
+                        self._thermal_gov_recover_temp_c,
+                        self._thermal_gov_step_mhz,
+                        self._thermal_gov_step_interval_sec,
+                    )
                 break
             except Exception as e:
                 logging.error("Attempt %d: ASIC init/power failed: %s", attempt + 1, e)
@@ -489,7 +529,9 @@ class BM1366Miner:
 
             logging.info("temperature and voltage: %s", str(temp))
 
-
+            board_temp = temp["temp"][0]
+            if board_temp is not None:
+                self._thermal_governor_tick(board_temp)
 
             for i in range(0, 4):
                 if temp["temp"][i] is not None and temp["temp"][i] > self.max_board_temp_c:
@@ -502,6 +544,75 @@ class BM1366Miner:
                     os._exit(1)
 
             time.sleep(1.5)
+
+    def _thermal_governor_tick(self, board_temp):
+        """Step ASIC clock down near trip / up when cool. Hard trip remains last resort."""
+        if not self._thermal_gov_enabled or not self.asic_initialized:
+            return
+        if self.asics is None or not hasattr(self.asics, "clock_manager"):
+            return
+        clock_manager = getattr(self.asics, "clock_manager", None)
+        if clock_manager is None:
+            return
+
+        now = time.time()
+        target = float(self._asic_frequency_target_mhz)
+        current = float(self._current_asic_mhz)
+        if target <= 0 or current <= 0:
+            return
+
+        step = float(self._thermal_gov_step_mhz)
+        min_mhz = float(self._thermal_gov_min_mhz)
+        throttle_temp = float(self._thermal_gov_throttle_temp_c)
+        recover_temp = float(self._thermal_gov_recover_temp_c)
+        interval = float(self._thermal_gov_step_interval_sec)
+        emergency_temp = self.max_board_temp_c - 1.0
+
+        with self.stats.lock:
+            self.stats.asic_frequency_mhz = current
+            self.stats.asic_frequency_target_mhz = target
+
+        want_down = board_temp >= throttle_temp and current > min_mhz + 1e-6
+        want_up = board_temp <= recover_temp and current < target - 1e-6
+        emergency = board_temp >= emergency_temp and current > min_mhz + 1e-6
+
+        if not want_down and not want_up and not emergency:
+            return
+
+        # Prefer throttle over recover if thresholds ever overlap.
+        if want_down or emergency:
+            if not emergency and (now - self._thermal_gov_last_step_ts) < interval:
+                return
+            new_mhz = max(min_mhz, current - step)
+            if new_mhz >= current - 1e-9:
+                return
+            direction = "down"
+        else:
+            if (now - self._thermal_gov_last_step_ts) < interval:
+                return
+            new_mhz = min(target, current + step)
+            if new_mhz <= current + 1e-9:
+                return
+            direction = "up"
+
+        try:
+            clock_manager.set_clock(-1, new_mhz)
+        except Exception as ex:
+            logging.warning("thermal governor set_clock failed: %s", ex)
+            return
+
+        logging.info(
+            "thermal governor: %.2f → %.2f MHz (temp %.1f°C, %s)",
+            current,
+            new_mhz,
+            board_temp,
+            direction,
+        )
+        self._current_asic_mhz = new_mhz
+        self._thermal_gov_last_step_ts = now
+        with self.stats.lock:
+            self.stats.asic_frequency_mhz = new_mhz
+            self.stats.asic_frequency_target_mhz = target
 
     def _serial_tx_func(self, data):
         with self.serial_lock:
