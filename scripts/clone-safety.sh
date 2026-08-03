@@ -7,8 +7,11 @@
 #     clear stale Wi-Fi client profiles, expand root to fill the new drive
 #   - Always record the current fingerprint afterward
 #
-# Does NOT touch /var/lib/bitcoind, admin credentials, or Wi-Fi settings in config.json
-# except regenerating setup_token while setup_complete is false.
+# Does NOT touch /var/lib/bitcoind.
+# On identity refresh (cloned hardware): regenerates setup_token + ap_password when
+# setup is incomplete, and drops machine-id-bound sealed secrets (wifi/totp).
+# prepare-clone also wipes admin/Wi-Fi/2FA and removes imaging-host secrets
+# (OTA signing keys, gh credentials) from the service-user home.
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -16,6 +19,9 @@ CONFIG_JSON="${CONFIG_JSON:-${PROJECT_DIR}/data/config.json}"
 STATE_FILE="/var/lib/blockvase/device-identity.env"
 CLIENT_CONN="${CLIENT_CONN:-blockvase-home}"
 HOTSPOT_CONN="${HOTSPOT_CONN:-blockvase-hotspot}"
+SERVICE_USER="${BLOCKVASE_SERVICE_USER:-blockvase}"
+SERVICE_HOME="$(getent passwd "${SERVICE_USER}" 2>/dev/null | cut -d: -f6 || true)"
+SERVICE_HOME="${SERVICE_HOME:-/home/${SERVICE_USER}}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "clone-safety: must run as root"
@@ -113,7 +119,9 @@ else:
 PY
 }
 
-refresh_setup_token_if_unconfigured() {
+# After machine-id rotation on a clone, sealed secrets are invalid and every unit
+# must get its own AP PSK (master prepare-clone would otherwise bake one shared PSK).
+refresh_secrets_after_identity_change() {
   local config="$1"
   [[ -f "$config" ]] || return 0
   python3 - "$config" <<'PY'
@@ -124,20 +132,44 @@ try:
         cfg = json.load(f)
 except Exception:
     sys.exit(0)
-if cfg.get("setup_complete"):
-    sys.exit(0)
-cfg["setup_token"] = secrets.token_urlsafe(16)
+
+# machine-id changed: sealed blobs are no longer valid on this hardware.
+cfg["wifi_password_enc"] = ""
+cfg.pop("wifi_password", None)
+cfg["totp_secret_enc"] = ""
+cfg["totp_pending_secret_enc"] = ""
+cfg["totp_enabled"] = False
+cfg["session_token"] = ""
+# Unique setup AP password per clone (SSID already uses per-device MAC suffix).
+cfg["ap_password"] = secrets.token_urlsafe(12)
+if not cfg.get("setup_complete"):
+    cfg["setup_token"] = secrets.token_urlsafe(16)
+
 with open(path, "w", encoding="utf-8") as f:
     json.dump(cfg, f, indent=2, sort_keys=True)
     f.write("\n")
+print("clone-safety: refreshed ap_password" + (
+    " and setup_token" if not cfg.get("setup_complete") else ""
+) + " after identity change")
 PY
-  local owner="blockvase"
+  local owner="${SERVICE_USER}"
   if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
     owner="${SUDO_USER}"
-  elif id -u blockvase >/dev/null 2>&1; then
-    owner="blockvase"
+  elif id -u "${SERVICE_USER}" >/dev/null 2>&1; then
+    owner="${SERVICE_USER}"
   fi
   chown "${owner}:${owner}" "$config" 2>/dev/null || true
+  chmod 600 "$config" 2>/dev/null || true
+}
+
+# Strip secrets that must never ship on manufactured images (dev/signing hosts).
+clear_imaging_host_secrets() {
+  echo "clone-safety: clearing imaging-host secrets under ${SERVICE_HOME}"
+  rm -rf "${SERVICE_HOME}/.blockvase-secrets" 2>/dev/null || true
+  rm -rf "${SERVICE_HOME}/.config/gh" 2>/dev/null || true
+  rm -f "${SERVICE_HOME}/.git-credentials" 2>/dev/null || true
+  # Cursor/agent tokens if present on a factory master — not needed on units.
+  rm -rf "${SERVICE_HOME}/.cursor/ai-tracking" 2>/dev/null || true
 }
 
 clear_stale_wifi_client_profiles() {
@@ -307,7 +339,7 @@ run_clone_safety() {
       ssh-keygen -A || true
     fi
     clear_stale_wifi_client_profiles
-    refresh_setup_token_if_unconfigured "$CONFIG_JSON"
+    refresh_secrets_after_identity_change "$CONFIG_JSON"
 
     if [[ -z "$current_hostname" || "$current_hostname" == "raspberrypi" || "$current_hostname" == "blockvase" || "$current_hostname" == "ubuntu" || "$current_hostname" == "$previous_managed_hostname" || "$current_hostname" =~ ^blockvase-[0-9a-f]{6,12}$ ]]; then
       echo "$new_hostname" > /etc/hostname
@@ -361,6 +393,7 @@ prepare_clone_source() {
   echo "clone-safety: preparing clone source (preserving /var/lib/bitcoind)"
   clear_stale_wifi_client_profiles
   clear_mining_runtime
+  clear_imaging_host_secrets
 
   python3 - "$CONFIG_JSON" <<'PY'
 import json, secrets, sys
@@ -376,6 +409,7 @@ cfg.pop("wifi_password", None)
 cfg["wifi_password_enc"] = ""
 cfg["setup_token"] = secrets.token_urlsafe(16)
 cfg["session_token"] = ""
+# Placeholder only — each clone regenerates ap_password on first identity refresh.
 cfg["ap_password"] = secrets.token_urlsafe(12)
 cfg["totp_enabled"] = False
 cfg["totp_secret_enc"] = ""
@@ -395,13 +429,14 @@ if wifi_secret.exists():
 print("setup_complete=false")
 print("wifi credentials cleared")
 print("admin credentials cleared")
+print("2FA secrets cleared")
 print("mining payout cleared")
 print("setup_token regenerated")
-print("ap_password regenerated")
+print("ap_password regenerated (clones refresh again on first boot)")
 PY
-  local owner="blockvase"
-  if id -u blockvase >/dev/null 2>&1; then
-    owner="blockvase"
+  local owner="${SERVICE_USER}"
+  if id -u "${SERVICE_USER}" >/dev/null 2>&1; then
+    owner="${SERVICE_USER}"
   elif [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
     owner="${SUDO_USER}"
   fi
@@ -419,8 +454,11 @@ PY
   echo "clone-safety: prepare-clone complete"
   echo "  - blockchain datadir left untouched"
   echo "  - mining payout cleared (miner stays enabled for board monitoring)"
+  echo "  - admin / Wi-Fi / 2FA / session cleared; imaging-host OTA/gh secrets removed"
   echo "  - setup will show AP/QR on next boot of this image / clones"
+  echo "  - each clone gets a unique AP password on first identity refresh"
   echo "  - power off cleanly, then image this drive"
+  echo "  - note: Linux user/root passwords on the image are still shared; rotate per unit if needed"
 }
 
 mode="${1:-run}"

@@ -40,6 +40,13 @@ from .totp import generate_secret, otpauth_uri, verify_totp
 app = Flask(__name__, template_folder="../templates", static_folder="../static")
 state = StateManager()
 _log = logging.getLogger("blockvase")
+if not _log.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s blockvase: %(message)s"))
+    _log.addHandler(_handler)
+    _log.setLevel(logging.INFO)
+    _log.propagate = False
+REBOOT_BIN = "/usr/sbin/reboot"
 MINING_PAYOUT_PATH = Path("/etc/blockvase/solo_mining_address")
 UPDATE_STATUS_PATH = Path("/var/lib/blockvase/update-status.json")
 # Prefer root-owned install path from bootstrap (NOPASSWD targets); fall back to repo copy.
@@ -171,6 +178,16 @@ def _sync_hostname(device_name: str) -> None:
         _log.warning("hostnamectl: %s", ex)
 
 
+def _invoke_reboot() -> None:
+    """Request an immediate reboot via the NOPASSWD sudoers path."""
+    try:
+        subprocess.Popen(["sudo", REBOOT_BIN], start_new_session=True)
+        _log.info("reboot requested via sudo %s", REBOOT_BIN)
+    except OSError as ex:
+        _log.exception("reboot request failed: %s", ex)
+        raise
+
+
 def _schedule_reboot_after_save(delay_sec: float = 8.0) -> bool:
     """Reboot the device shortly after HTTP responds (Save & Reboot). Returns True if scheduled."""
     if os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() != "true":
@@ -180,9 +197,9 @@ def _schedule_reboot_after_save(delay_sec: float = 8.0) -> bool:
     def _run() -> None:
         time.sleep(delay_sec)
         try:
-            subprocess.Popen(["sudo", "reboot"])
-        except OSError as ex:
-            _log.exception("scheduled reboot after save-all failed: %s", ex)
+            _invoke_reboot()
+        except OSError:
+            pass
 
     threading.Thread(target=_run, daemon=True).start()
     return True
@@ -1036,27 +1053,41 @@ def save_all():
                 ap_script = _privileged_script("ap-mode.sh")
                 ok = False
                 if ap_script.exists():
-                    try:
-                        result = subprocess.run(
-                            ["sudo", str(ap_script), "ensure"],
-                            timeout=180,
-                            capture_output=True,
-                            text=True,
-                            encoding="utf-8",
-                            errors="replace",
-                        )
-                        ok = result.returncode == 0
-                        if not ok:
+                    # First AP→client handoff is flaky on some radios; retry once
+                    # before accepting soft-recovery (setup QR, no reboot).
+                    for attempt in (1, 2):
+                        try:
+                            result = subprocess.run(
+                                ["sudo", str(ap_script), "ensure"],
+                                timeout=180,
+                                capture_output=True,
+                                text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                            )
+                            ok = result.returncode == 0
+                            if ok:
+                                _log.info(
+                                    "ap-mode ensure succeeded on attempt %s", attempt
+                                )
+                                break
                             _log.error(
-                                "ap-mode ensure failed (rc=%s): stdout=%r stderr=%r",
+                                "ap-mode ensure failed attempt %s (rc=%s): stdout=%r stderr=%r",
+                                attempt,
                                 result.returncode,
                                 result.stdout,
                                 result.stderr,
                             )
-                    except (subprocess.TimeoutExpired, OSError) as ex:
-                        _log.exception("ap-mode ensure: %s", ex)
+                        except (subprocess.TimeoutExpired, OSError) as ex:
+                            _log.exception("ap-mode ensure attempt %s: %s", attempt, ex)
+                        if attempt == 1:
+                            time.sleep(4)
                 if not ok:
                     # Soft recovery: keep credentials, show setup QR, do not reboot.
+                    _log.error(
+                        "Wi-Fi join failed after retries; staying in soft recovery "
+                        "(setup QR). Credentials are saved — reboot once radio joins."
+                    )
                     try:
                         cfg_retry = load_config()
                         if (cfg_retry.get("wifi_ssid") or "").strip():
@@ -1084,7 +1115,7 @@ def save_all():
                     return
                 time.sleep(2)
                 try:
-                    subprocess.Popen(["sudo", "reboot"])
+                    _invoke_reboot()
                 except OSError as ex:
                     _log.exception("scheduled reboot after wifi switch failed: %s", ex)
 
@@ -1298,7 +1329,11 @@ def reboot():
         return token_err
     if os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() != "true":
         return _json_err("System actions disabled (set ENABLE_SYSTEM_ACTIONS=true)")
-    subprocess.Popen(["sudo", "reboot"])
+    try:
+        _invoke_reboot()
+    except OSError as ex:
+        _log.exception("reboot API failed: %s", ex)
+        return _json_err("Reboot request failed", 500)
     return _json_ok(message="Reboot requested")
 
 
@@ -1339,7 +1374,11 @@ def factory_reset():
             )
         except (subprocess.TimeoutExpired, OSError) as ex:
             _log.exception("factory-reset mining/wifi cleanup failed: %s", ex)
-    subprocess.Popen(["sudo", "reboot"])
+    try:
+        _invoke_reboot()
+    except OSError as ex:
+        _log.exception("factory-reset reboot failed: %s", ex)
+        return _json_err("Reset applied but reboot failed; power-cycle the device.", 500)
     return _json_ok(message="Factory reset complete. Rebooting...")
 
 

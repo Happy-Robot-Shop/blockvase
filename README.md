@@ -300,19 +300,21 @@ Run install commands over **SSH** if a desktop is already on screen. Bootstrap t
 Use this when one prepared SD image should become many unique devices.
 
 1. **Build a master** with Path A on an SD card. Optionally let the chain sync first. Keep the SD root **compact**: do **not** expand it to fill a large disk before imaging.
-2. **Prepare for imaging** (resets setup/Wi-Fi/admin/mining, records the master fingerprint, leaves `/var/lib/bitcoind` alone):
+2. **Prepare for imaging** (resets setup/Wi-Fi/admin/2FA/mining, strips imaging-host secrets like OTA signing keys and `gh` creds, records the master fingerprint, leaves `/var/lib/bitcoind` alone):
    ```bash
    cd ~/blockvase
    sudo ./scripts/ap-mode.sh prepare-clone
    ```
+   Use `reset-setup` instead if you want the same wipe **and** an immediate reboot into setup AP/QR on this device (still keeps the chain).
 3. **Power off cleanly**, image the SD card, flash that image to each NVMe.
 4. **First boot is automatic.** When the hardware/storage fingerprint differs from the master, the device:
    - gets a new machine-id, SSH host keys, and hostname
-   - starts setup AP + QR
+   - regenerates a unique setup AP password + setup token
+   - starts setup AP + QR (`blockvase-<wlan-mac-suffix>`)
    - expands the root filesystem to fill the NVMe
    - keeps the Bitcoin datadir if it was on the master
 
-Repeat steps 3 to 4 for as many units as you need. You do **not** need to run bootstrap on each clone for identity, expand, or setup. Run it later only if you want package or code updates.
+Repeat steps 3 to 4 for as many units as you need. You do **not** need to run bootstrap on each clone for identity, expand, or setup. Run it later only if you want package or code updates. Keep the OTA signing private key **off** factory masters (or rely on prepare-clone removing `~/.blockvase-secrets`).
 
 ---
 

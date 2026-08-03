@@ -16,7 +16,8 @@
 #   check-online: if setup is complete but wlan is down, retry then soft-recover;
 #                 while in recovery, keep retrying saved network
 #   start|stop|status
-#   prepare-clone: reset setup for imaging (keeps blockchain); then start AP
+#   prepare-clone: reset setup for imaging (keeps blockchain); then start AP (no reboot)
+#   reset-setup: prepare-clone then reboot into setup AP/QR (keeps blockchain)
 #   after-factory-reset: clear mining runtime + stale Wi-Fi client profiles
 
 set -euo pipefail
@@ -336,10 +337,14 @@ connect_to_wifi() {
   for ((i = 1; i <= attempts; i++)); do
     echo "ap-mode: connecting to '${ssid}' (attempt ${i}/${attempts})"
     if activate_client 2>/dev/null; then
-      sleep 2
-      if wlan_is_connected; then
-        return 0
-      fi
+      # Association + DHCP often need more than 2s after leaving setup AP.
+      local settle
+      for settle in 3 5 8; do
+        sleep "${settle}"
+        if wlan_is_connected; then
+          return 0
+        fi
+      done
     fi
     sleep 3
   done
@@ -535,7 +540,7 @@ main() {
   local mode="${1:-ensure}"
 
   case "${mode}" in
-    prepare-clone)
+    prepare-clone|reset-setup)
       if [[ -x "${CLONE_SAFETY}" ]]; then
         PROJECT_DIR="${PROJECT_DIR}" CONFIG_JSON="${CONFIG_JSON}" \
           CLIENT_CONN="${CLIENT_CONN}" HOTSPOT_CONN="${HOTSPOT_CONN}" \
@@ -551,6 +556,11 @@ main() {
       start_hotspot "${cfg[1]}" "${cfg[2]}"
       install_wifi_watchers
       apply_bitcoind_network_gate
+      if [[ "${mode}" == "reset-setup" ]]; then
+        echo "ap-mode: reset-setup complete; rebooting into setup AP/QR"
+        # Detach so callers (portal/ssh) are not killed mid-reboot request.
+        nohup /usr/sbin/reboot >/dev/null 2>&1 &
+      fi
       ;;
     install-wifi-watchers)
       install_wifi_watchers
@@ -573,18 +583,19 @@ main() {
         start_hotspot "${ap_ssid}" "${ap_password}"
       else
         stop_hotspot
-        sleep 2
+        # Give wlan0 time to leave AP mode before scanning for home Wi-Fi.
+        sleep 4
         nm_ensure_ready
         if [[ -z "${wifi_ssid}" ]]; then
           echo "ap-mode: no wifi_ssid; entering recovery"
           enter_wifi_recovery "${ap_ssid}" "${ap_password}" ""
           ensure_rc=1
-        elif ! connect_to_wifi "${wifi_ssid}" "${wifi_password}" 5; then
+        elif ! connect_to_wifi "${wifi_ssid}" "${wifi_password}" 8; then
           echo "ap-mode: home Wi-Fi connect failed after retries; entering soft recovery"
           enter_wifi_recovery "${ap_ssid}" "${ap_password}" "${wifi_ssid}"
           ensure_rc=1
         else
-          sleep 2
+          sleep 3
           if ! wlan_is_connected; then
             echo "ap-mode: home Wi-Fi not associated after connect; entering soft recovery"
             enter_wifi_recovery "${ap_ssid}" "${ap_password}" "${wifi_ssid}"
@@ -617,7 +628,7 @@ main() {
       nmcli device status
       ;;
     *)
-      echo "Usage: $0 {ensure|check-online|start|stop|status|prepare-clone|after-factory-reset|install-wifi-watchers}"
+      echo "Usage: $0 {ensure|check-online|start|stop|status|prepare-clone|reset-setup|after-factory-reset|install-wifi-watchers}"
       exit 2
       ;;
   esac

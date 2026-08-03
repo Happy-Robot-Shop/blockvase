@@ -7,7 +7,12 @@ set -euo pipefail
 IFACE="${1:-}"
 ACTION="${2:-}"
 WLAN_IFACE="${BLOCKVASE_WLAN_IFACE:-wlan0}"
-AP_MODE_SCRIPT="__PROJECT_DIR__/scripts/ap-mode.sh"
+# Prefer the root-owned install path (matches portal sudoers); fall back to tree.
+if [[ -x /usr/lib/blockvase/ap-mode.sh ]]; then
+  AP_MODE_SCRIPT="/usr/lib/blockvase/ap-mode.sh"
+else
+  AP_MODE_SCRIPT="__PROJECT_DIR__/scripts/ap-mode.sh"
+fi
 
 [[ "${IFACE}" == "${WLAN_IFACE}" ]] || exit 0
 
