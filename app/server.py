@@ -75,6 +75,12 @@ DEVICE_UPDATE_SCRIPT = (
 )
 ADMIN_COOKIE_NAME = "blockvase_admin"
 ADMIN_COOKIE_MAX_AGE = 60 * 60 * 24 * 30
+# Login / step-up brute-force protection (in-process; resets on portal restart).
+_AUTH_FAIL_WINDOW_SEC = 300
+_AUTH_FAIL_MAX = 8
+_AUTH_LOCKOUT_SEC = 300
+_auth_fail_lock = threading.Lock()
+_auth_failures: dict[str, list[float]] = {}
 
 
 def _privileged_script(name: str) -> Path:
@@ -484,11 +490,64 @@ def _is_token_valid(cfg: dict[str, Any], token: str | None) -> bool:
     supplied = str(token or "")
     if not supplied:
         return False
-    for key in ("session_token", "setup_token"):
-        expected = str(cfg.get(key, "") or "")
-        if expected and _constant_time_equal(supplied, expected):
+    expected_session = str(cfg.get("session_token", "") or "")
+    if expected_session and _constant_time_equal(supplied, expected_session):
+        return True
+    # setup_token is admin-equivalent only during first-boot / Wi-Fi recovery UI.
+    if _needs_setup_ui(cfg):
+        expected_setup = str(cfg.get("setup_token", "") or "")
+        if expected_setup and _constant_time_equal(supplied, expected_setup):
             return True
     return False
+
+
+def _auth_client_key() -> str:
+    return str(request.remote_addr or "unknown")
+
+
+def _auth_fail_bucket(key: str) -> list[float]:
+    now = time.time()
+    cutoff = now - max(_AUTH_FAIL_WINDOW_SEC, _AUTH_LOCKOUT_SEC)
+    with _auth_fail_lock:
+        stamps = [t for t in _auth_failures.get(key, []) if t >= cutoff]
+        if stamps:
+            _auth_failures[key] = stamps
+        else:
+            _auth_failures.pop(key, None)
+        return list(stamps)
+
+
+def _auth_rate_limited(key: str | None = None):
+    """Return a 429 (response, status) when the client is locked out; otherwise None."""
+    client = key or _auth_client_key()
+    stamps = _auth_fail_bucket(client)
+    if len(stamps) < _AUTH_FAIL_MAX:
+        return None
+    oldest_in_burst = min(stamps[-_AUTH_FAIL_MAX:])
+    retry_after = int(max(1, _AUTH_LOCKOUT_SEC - (time.time() - oldest_in_burst)))
+    response = jsonify(
+        {
+            "success": False,
+            "error": f"Too many failed authentication attempts. Try again in {retry_after}s.",
+        }
+    )
+    response.headers["Retry-After"] = str(retry_after)
+    return response, 429
+
+
+def _record_auth_failure(key: str | None = None) -> None:
+    client = key or _auth_client_key()
+    now = time.time()
+    with _auth_fail_lock:
+        stamps = [t for t in _auth_failures.get(client, []) if t >= now - max(_AUTH_FAIL_WINDOW_SEC, _AUTH_LOCKOUT_SEC)]
+        stamps.append(now)
+        _auth_failures[client] = stamps
+
+
+def _clear_auth_failures(key: str | None = None) -> None:
+    client = key or _auth_client_key()
+    with _auth_fail_lock:
+        _auth_failures.pop(client, None)
 
 
 def _has_admin_credentials(cfg: dict[str, Any]) -> bool:
@@ -589,20 +648,68 @@ def _set_admin_cookie(response, cfg: dict[str, Any]):
     return response
 
 
-def _require_step_up_password(cfg: dict[str, Any], body: dict[str, Any] | None = None):
-    """Re-check admin password (+ TOTP when enabled) for high-risk wallet actions."""
+def _step_up_fields(body: dict[str, Any] | None = None) -> dict[str, str]:
+    """Normalize step-up fields from JSON (supports current_* aliases for credential change)."""
     body = body or {}
-    username = str(body.get("username", "") or "").strip()
-    password = str(body.get("password", "") or "")
+    username = str(
+        body.get("username")
+        or body.get("current_username")
+        or body.get("currentUsername")
+        or ""
+    ).strip()
+    password = str(
+        body.get("password")
+        or body.get("current_password")
+        or body.get("currentPassword")
+        or ""
+    )
+    totp_code = str(body.get("totp_code") or body.get("code") or body.get("totpCode") or "").strip()
+    return {"username": username, "password": password, "totp_code": totp_code}
+
+
+def _require_step_up_password(cfg: dict[str, Any], body: dict[str, Any] | None = None):
+    """Re-check admin password (+ TOTP when enabled) for high-risk actions."""
+    limited = _auth_rate_limited()
+    if limited:
+        return limited
+    fields = _step_up_fields(body)
+    username = fields["username"]
+    password = fields["password"]
     if not _has_admin_credentials(cfg):
         return _json_err("Admin credentials are not configured", 403)
     if not _is_admin_password_valid(cfg, username, password):
+        _record_auth_failure()
         return _json_err("Invalid username or password", 403)
     if _totp_enabled(cfg):
-        code = str(body.get("totp_code", "") or body.get("code", "") or "").strip()
-        if not verify_totp(_totp_secret(cfg), code):
+        if not verify_totp(_totp_secret(cfg), fields["totp_code"]):
+            _record_auth_failure()
             return _json_err("Invalid authenticator code", 403)
+    _clear_auth_failures()
     return None
+
+
+def _require_step_up_when_configured(cfg: dict[str, Any], body: dict[str, Any] | None = None):
+    """Step-up when admin credentials exist; allow setup-token-only first-boot paths otherwise."""
+    if not _has_admin_credentials(cfg):
+        return None
+    return _require_step_up_password(cfg, body)
+
+
+def _require_credential_change_step_up(cfg: dict[str, Any], body: dict[str, Any] | None = None):
+    """Step-up for changing username/password: always verify against the *current* admin user."""
+    if not _has_admin_credentials(cfg):
+        return None
+    body = body or {}
+    step_body = {
+        "username": str(cfg.get("admin_username", "") or ""),
+        "password": str(
+            body.get("currentPassword")
+            or body.get("current_password")
+            or ""
+        ),
+        "totp_code": str(body.get("totp_code") or body.get("totpCode") or body.get("code") or ""),
+    }
+    return _require_step_up_password(cfg, step_body)
 
 
 def _ap_password(cfg: dict[str, Any]) -> str:
@@ -1009,9 +1116,13 @@ def admin_auth_status():
 def admin_auth_login():
     body = request.get_json(force=True, silent=True) or {}
     cfg = load_config()
+    limited = _auth_rate_limited()
+    if limited:
+        return limited
     username = str(body.get("username", "")).strip()
     password = str(body.get("password", ""))
     if not _is_admin_password_valid(cfg, username, password):
+        _record_auth_failure()
         return _json_err("Invalid username or password", 403)
     if _totp_enabled(cfg):
         pending = _create_pending_2fa(username)
@@ -1020,6 +1131,7 @@ def admin_auth_login():
             pending_token=pending,
             message="Enter the 6-digit code from your authenticator app.",
         )
+    _clear_auth_failures()
     _issue_session_token(cfg)
     save_config(cfg)
     response = _json_ok(needs_2fa=False, message="Authenticated")
@@ -1030,6 +1142,9 @@ def admin_auth_login():
 def admin_auth_login_2fa():
     body = request.get_json(force=True, silent=True) or {}
     cfg = load_config()
+    limited = _auth_rate_limited()
+    if limited:
+        return limited
     if not _totp_enabled(cfg):
         return _json_err("Two-factor authentication is not enabled", 400)
     pending = str(body.get("pending_token", "") or "")
@@ -1038,8 +1153,10 @@ def admin_auth_login_2fa():
     if not username:
         return _json_err("Login challenge expired. Sign in again.", 403)
     if username != str(cfg.get("admin_username", "") or ""):
+        _record_auth_failure()
         return _json_err("Invalid two-factor code", 403)
     if not verify_totp(_totp_secret(cfg), code):
+        _record_auth_failure()
         # Re-issue pending so a mistyped code does not force full re-login immediately.
         new_pending = _create_pending_2fa(username)
         return jsonify(
@@ -1050,6 +1167,7 @@ def admin_auth_login_2fa():
                 "pending_token": new_pending,
             }
         ), 403
+    _clear_auth_failures()
     _issue_session_token(cfg)
     save_config(cfg)
     response = _json_ok(message="Authenticated")
@@ -1063,6 +1181,10 @@ def admin_auth_credentials():
     token_err = _require_admin_token(cfg, body)
     if token_err:
         return token_err
+    # Changing existing credentials requires the current password (+ TOTP when enabled).
+    step_err = _require_credential_change_step_up(cfg, body)
+    if step_err:
+        return step_err
     username = str(body.get("username", "")).strip()
     password = str(body.get("password", ""))
     err = _save_admin_credentials(cfg, username, password)
@@ -1283,6 +1405,9 @@ def set_mining_payout():
     token_err = _require_admin_token(cfg, body)
     if token_err:
         return token_err
+    step_err = _require_step_up_when_configured(cfg, body)
+    if step_err:
+        return step_err
 
     address = str(body.get("address", "")).strip()
     source = "custom"
@@ -1320,6 +1445,9 @@ def generate_mining_payout():
     token_err = _require_admin_token(cfg, body)
     if token_err:
         return token_err
+    step_err = _require_step_up_when_configured(cfg, body)
+    if step_err:
+        return step_err
     with _mining_payout_ensure_lock:
         try:
             # Works during IBD — only needs wallet RPC, not a synced tip.
@@ -1551,6 +1679,10 @@ def save_all():
         admin_username = str(body.get("adminUsername", "")).strip()
         admin_password = str(body.get("adminPassword", ""))
         if admin_username or admin_password:
+            # After first setup, changing username/password requires current password (+ TOTP).
+            step_err = _require_credential_change_step_up(cfg, body)
+            if step_err:
+                return step_err
             err = _save_admin_credentials(cfg, admin_username, admin_password)
             if err:
                 return _json_err(err)
@@ -1877,10 +2009,14 @@ def reboot():
 
 @app.post("/api/factory-reset")
 def factory_reset():
+    body = request.get_json(force=True, silent=True) or {}
     cfg_before = load_config()
-    token_err = _require_admin_token(cfg_before)
+    token_err = _require_admin_token(cfg_before, body)
     if token_err:
         return token_err
+    step_err = _require_step_up_when_configured(cfg_before, body)
+    if step_err:
+        return step_err
     if os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() != "true":
         return _json_err(
             "Factory reset requires ENABLE_SYSTEM_ACTIONS=true (and sudoers for reboot)"
@@ -1936,10 +2072,14 @@ def device_update_status():
 
 @app.post("/api/device-update")
 def device_update_start():
+    body = request.get_json(force=True, silent=True) or {}
     cfg = load_config()
-    token_err = _require_admin_token(cfg)
+    token_err = _require_admin_token(cfg, body)
     if token_err:
         return token_err
+    step_err = _require_step_up_when_configured(cfg, body)
+    if step_err:
+        return step_err
     if os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() != "true":
         return _json_err("System actions disabled (set ENABLE_SYSTEM_ACTIONS=true)")
     if not DEVICE_UPDATE_SCRIPT.is_file():

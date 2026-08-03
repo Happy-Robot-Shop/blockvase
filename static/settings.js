@@ -1,9 +1,44 @@
 const setupToken = new URLSearchParams(window.location.search).get("token") || "";
+let totpEnabled = false;
 
 function withToken(path) {
   if (!setupToken) return path;
   const sep = path.includes("?") ? "&" : "?";
   return `${path}${sep}token=${encodeURIComponent(setupToken)}`;
+}
+
+function setStepUpTotpVisible(enabled) {
+  totpEnabled = !!enabled;
+  ["adminCurrentTotpWrap", "miningPayoutTotpWrap", "actionStepUpTotpWrap"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = totpEnabled ? "block" : "none";
+  });
+}
+
+function readStepUpFields(prefix) {
+  const username = (document.getElementById(prefix + "Username")?.value || "").trim();
+  const password = document.getElementById(prefix + "Password")?.value || "";
+  const totp_code = (document.getElementById(prefix + "Totp")?.value || "").trim();
+  return { username, password, totp_code };
+}
+
+function clearStepUpSecrets(prefix) {
+  const pw = document.getElementById(prefix + "Password");
+  const totp = document.getElementById(prefix + "Totp");
+  if (pw) pw.value = "";
+  if (totp) totp.value = "";
+}
+
+function requireStepUpFields(fields, statusEl) {
+  if (!fields.username || !fields.password) {
+    showStatus(statusEl, "error", "Re-enter admin username and password to continue");
+    return false;
+  }
+  if (totpEnabled && !fields.totp_code) {
+    showStatus(statusEl, "error", "Authenticator code is required");
+    return false;
+  }
+  return true;
 }
 
 function showLoading(msg) {
@@ -209,11 +244,22 @@ function refreshTotpUi() {
     .then(r => r.json())
     .then(d => {
       const on = !!d.totp_enabled;
-      if (stateLabel) stateLabel.textContent = on ? "Status: enabled" : "Status: off";
+      setStepUpTotpVisible(on);
+      if (stateLabel) {
+        stateLabel.textContent = on
+          ? "Status: enabled"
+          : "Status: off — enable 2FA to harden wallet and mining controls";
+      }
       if (beginBtn) beginBtn.style.display = on ? "none" : "";
       if (disableBtn) disableBtn.style.display = on ? "" : "none";
       if (enroll && on) enroll.style.display = "none";
       if (disablePanel && !on) disablePanel.style.display = "none";
+      const miningUser = document.getElementById("miningPayoutUsername");
+      const actionUser = document.getElementById("actionStepUpUsername");
+      if (d.username) {
+        if (miningUser && !miningUser.value) miningUser.value = d.username;
+        if (actionUser && !actionUser.value) actionUser.value = d.username;
+      }
     })
     .catch(() => {
       if (stateLabel) stateLabel.textContent = "Status: unavailable";
@@ -430,11 +476,18 @@ function saveMiningPayout(e) {
     showStatus(statusDiv, "error", "Bitcoin payout address is required");
     return;
   }
+  const stepUp = readStepUpFields("miningPayout");
+  if (!requireStepUpFields(stepUp, statusDiv)) return;
   miningPayoutInFlight = true;
   if (form) form.querySelectorAll("button,input").forEach((el) => { el.disabled = true; });
   showLoading("Saving mining payout address...");
   showStatus(statusDiv, "info", "Saving mining payout address...");
-  const payload = { address };
+  const payload = {
+    address,
+    username: stepUp.username,
+    password: stepUp.password,
+    totp_code: stepUp.totp_code,
+  };
   if (setupToken) payload.token = setupToken;
   fetch(withToken("/api/mining-payout"), {
     method: "POST",
@@ -444,6 +497,7 @@ function saveMiningPayout(e) {
     .then(r => parseJsonResponse(r))
     .then(d => {
       hideLoading();
+      clearStepUpSecrets("miningPayout");
       if (d.success) {
         input.value = d.address || address;
         setMiningPayoutSourceNote(d);
@@ -467,6 +521,8 @@ function generateMiningPayout() {
   const input = document.getElementById("miningPayoutAddress");
   const statusDiv = document.getElementById("miningPayoutStatus");
   const form = document.getElementById("miningPayoutForm");
+  const stepUp = readStepUpFields("miningPayout");
+  if (!requireStepUpFields(stepUp, statusDiv)) return;
   miningPayoutInFlight = true;
   if (form) form.querySelectorAll("button,input").forEach((el) => { el.disabled = true; });
   showLoading("Generating address from this node...");
@@ -475,7 +531,11 @@ function generateMiningPayout() {
     "info",
     "Generating a new address from this node’s wallet (works during IBD)..."
   );
-  const payload = {};
+  const payload = {
+    username: stepUp.username,
+    password: stepUp.password,
+    totp_code: stepUp.totp_code,
+  };
   if (setupToken) payload.token = setupToken;
   fetch(withToken("/api/mining-payout/generate"), {
     method: "POST",
@@ -485,6 +545,7 @@ function generateMiningPayout() {
     .then(r => parseJsonResponse(r))
     .then(d => {
       hideLoading();
+      clearStepUpSecrets("miningPayout");
       if (d.success) {
         if (input) input.value = d.address || "";
         setMiningPayoutSourceNote(d);
@@ -710,13 +771,29 @@ function saveAll(e) {
         showStatus(adminCredStatus || statusDiv, "error", "Admin password must be at least 8 characters");
         return;
       }
+      const currentPassword = document.getElementById("adminCurrentPassword")?.value || "";
+      const currentTotp = (document.getElementById("adminCurrentTotp")?.value || "").trim();
+      if (!currentPassword) {
+        showStatus(adminCredStatus || statusDiv, "error", "Current admin password is required to change login credentials");
+        return;
+      }
+      if (totpEnabled && !currentTotp) {
+        showStatus(adminCredStatus || statusDiv, "error", "Authenticator code is required to change login credentials");
+        return;
+      }
       savePayload.adminUsername = adminUsername;
       savePayload.adminPassword = adminPassword;
+      savePayload.currentPassword = currentPassword;
+      savePayload.totp_code = currentTotp;
     }
 
     document.getElementById("password").value = "";
     if (adminPasswordEl) adminPasswordEl.value = "";
     if (adminConfirmEl) adminConfirmEl.value = "";
+    const currentPwEl = document.getElementById("adminCurrentPassword");
+    const currentTotpEl = document.getElementById("adminCurrentTotp");
+    if (currentPwEl) currentPwEl.value = "";
+    if (currentTotpEl) currentTotpEl.value = "";
   }
 
   showLoading("Saving settings...");
@@ -855,6 +932,8 @@ function refreshUpdateAvailability(forceRefresh) {
 
 function updateDevice() {
   const a = document.getElementById("actionStatus");
+  const stepUp = readStepUpFields("actionStepUp");
+  if (!requireStepUpFields(stepUp, a)) return;
   if (
     !confirm(
       "Update this device from the source repository? The display and portal will show an updating screen while git pull and bootstrap run. This can take several minutes."
@@ -871,9 +950,20 @@ function updateDevice() {
       show_overlay: true,
     });
   }
-  fetch(withToken("/api/device-update"), { method: "POST" })
+  const payload = {
+    username: stepUp.username,
+    password: stepUp.password,
+    totp_code: stepUp.totp_code,
+  };
+  if (setupToken) payload.token = setupToken;
+  fetch(withToken("/api/device-update"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
     .then((r) => r.json().then((d) => ({ ok: r.ok, data: d })))
     .then(({ ok, data }) => {
+      clearStepUpSecrets("actionStepUp");
       if (ok && data.success) {
         showStatus(a, "success", data.message || "Device update started");
         if (typeof window.blockvaseShowDeviceUpdateOverlay === "function") {
@@ -917,16 +1007,29 @@ function reboot() {
 
 function factoryReset() {
   const a = document.getElementById("actionStatus");
+  const stepUp = readStepUpFields("actionStepUp");
+  if (!requireStepUpFields(stepUp, a)) return;
   if (
     !confirm(
-      "Factory reset clears app settings (Wi-Fi, display, mining address, setup state). Bitcoin Knots blockchain data and /etc/bitcoin/bitcoin.conf are not modified; RPC credentials saved for this UI are preserved. Continue?"
+      "Factory reset clears app settings (Wi-Fi, display, mining address, setup state) and wipes portal/mining wallets. Bitcoin Knots blockchain data and /etc/bitcoin/bitcoin.conf are not modified. Continue?"
     )
   )
     return;
   showStatus(a, "info", "Resetting to factory defaults...");
-  fetch(withToken("/api/factory-reset"), { method: "POST" })
+  const payload = {
+    username: stepUp.username,
+    password: stepUp.password,
+    totp_code: stepUp.totp_code,
+  };
+  if (setupToken) payload.token = setupToken;
+  fetch(withToken("/api/factory-reset"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
     .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
     .then(({ ok, data }) => {
+      clearStepUpSecrets("actionStepUp");
       if (ok && data.success) showStatus(a, "success", data.message || "Factory reset complete. Rebooting...");
       else showStatus(a, "error", data?.error || "Factory reset failed");
     })

@@ -335,7 +335,7 @@ After setup:
 
 Setup creates a receiving address in the **portal spend wallet** (`blockvase-spend`) for solo-mining payouts by default, so rewards appear under `/wallet`. Override or regenerate it in **Settings → Solo Mining**; hashing waits until the node finishes IBD/catch-up. A custom payout address can point anywhere (cold wallet, etc.).
 
-`/wallet` send/receive/history/backup use that same spend wallet. Export a descriptor backup from `/wallet` and store it offline—clone prep and factory reset wipe wallet keys. The portal stays on plain HTTP (no device TLS certs); admin cookies use `Secure` only when the request is already HTTPS (e.g. a reverse proxy).
+`/wallet` send/receive/history/backup use that same spend wallet. Export a descriptor backup from `/wallet` and store it offline—clone prep and factory reset wipe wallet keys. The portal stays on plain HTTP (no device TLS certs); admin cookies use `Secure` only when the request is already HTTPS (e.g. a reverse proxy). Keep the portal on a trusted LAN (do not expose `:80` to the internet). Enable TOTP in Settings; password re-entry (+ TOTP when enabled) is required for wallet send/backup, mining payout changes, credential changes, factory reset, and device updates.
 
 **Setup Wi-Fi (before home Wi-Fi is saved)**
 
@@ -397,9 +397,11 @@ sudo systemctl status blockvase-ap bitcoind blockvase blockvase-kiosk
 | AP / Wi-Fi | `scripts/ap-mode.sh` via NetworkManager (`nmcli`) |
 | Clone / expand | `scripts/clone-safety.sh` (from `ap-mode ensure` and once from bootstrap) |
 | Port | `80` by default (`BLOCKVASE_PORT`) |
-| System actions | `/api/reboot`, `/api/factory-reset`, `/api/device-update` need admin session **and** `ENABLE_SYSTEM_ACTIONS=true` |
-| Device update | Settings → **Update device** runs `scripts/device-update.sh` (verify pinned `origin` + **SSH-signed tip**, then `git pull --ff-only` + `bootstrap.sh`). Trusted keys live in `security/ota-allowed-signers`. Kiosk + portal show a full-screen updating overlay. A background check (~every 30m) highlights the button when commits are available. |
-| Admin 2FA | Settings → Admin login → **Two-factor authentication** (optional TOTP). When enabled, login is password then authenticator code. |
+| System actions | `/api/reboot` needs admin session; `/api/factory-reset` and `/api/device-update` need session **+ password/+TOTP step-up** and `ENABLE_SYSTEM_ACTIONS=true` |
+| Device update | Settings → **Update device** (step-up) runs root-owned `/usr/lib/blockvase/device-update.sh` (verify pinned `origin` + **SSH-signed tip** via root-owned verifier + `/etc/blockvase` allowlists, then `git pull --ff-only` + `bootstrap.sh`). Source allowlists live in `security/`; appliances must not store the OTA private key. Kiosk + portal show a full-screen updating overlay. A background check (~every 30m) highlights the button when commits are available. |
+| Admin 2FA | Settings → Admin login → **Two-factor authentication** (strongly recommended TOTP). When enabled, login is password then authenticator code; step-up actions also require the code. Login/step-up are rate-limited. |
+| Credential change | Changing admin username/password requires the **current** password (+ TOTP when enabled), not session alone. |
+| Mining payout | `POST /api/mining-payout` and generate require admin session + password/+TOTP step-up. |
 | Privileges | The `blockvase` login user is **not** in the `sudo` group. Appliance actions use narrow NOPASSWD rules under `/usr/lib/blockvase/`. For shell maintenance, use root or temporarily re-add the user to `sudo`. |
 
 **Fee tiers** (`/api/blockchain-info`): external APIs → local mempool → `estimatesmartfee`. Response field `fee_source` is `external`, `local_mempool`, or `node`.
@@ -427,6 +429,7 @@ sudo systemctl status blockvase-ap bitcoind blockvase blockvase-kiosk
 | GET | `/api/wallet/receive-qr.svg` | Receive address QR (admin) |
 | POST | `/api/wallet/send` | Send from spend wallet (admin session + password/+TOTP step-up; amount as decimal string; blocked during IBD) |
 | POST | `/api/wallet/backup` | Export spend-wallet private descriptors (admin session + password/+TOTP step-up) |
+| POST | `/api/mining-payout` | Set solo payout address (admin session + password/+TOTP step-up) |
 
 Setup auth: setup token (`?token=`, `X-Setup-Token`, or JSON `token`) or admin cookie after login.
 

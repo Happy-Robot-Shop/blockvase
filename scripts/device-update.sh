@@ -89,14 +89,15 @@ BRANCH="$(sudo -u "${SERVICE_USER}" git rev-parse --abbrev-ref HEAD)"
 if [[ -z "${BRANCH}" || "${BRANCH}" == "HEAD" ]]; then
   fail "Could not determine git branch (detached HEAD?)."
 fi
-VERIFY_SCRIPT="${PROJECT_DIR}/scripts/verify-ota-update.sh"
-if [[ -x "${VERIFY_SCRIPT}" ]]; then
-  write_state "running" "Verifying signed update tip..." "${STARTED_AT}" ""
-  if ! sudo -u "${SERVICE_USER}" "${VERIFY_SCRIPT}" "origin/${BRANCH}"; then
-    fail "OTA signature/remote verification failed. Refusing to update."
-  fi
-else
-  fail "verify-ota-update.sh missing; refusing unsigned update path."
+# Always verify with the root-owned copy. Never run the user-writable tree script
+# (a compromised service user could replace it with `exit 0`).
+VERIFY_SCRIPT="/usr/lib/blockvase/verify-ota-update.sh"
+if [[ ! -x "${VERIFY_SCRIPT}" ]]; then
+  fail "Root-owned ${VERIFY_SCRIPT} missing; refusing unsigned update path."
+fi
+write_state "running" "Verifying signed update tip..." "${STARTED_AT}" ""
+if ! "${VERIFY_SCRIPT}" "origin/${BRANCH}"; then
+  fail "OTA signature/remote verification failed. Refusing to update."
 fi
 if ! sudo -u "${SERVICE_USER}" git pull --ff-only origin "${BRANCH}"; then
   fail "git pull --ff-only failed. Resolve local changes or network, then retry."

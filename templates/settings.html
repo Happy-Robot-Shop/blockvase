@@ -120,7 +120,7 @@
 
           <div class="metric-cluster">
             <h4 class="metric-cluster-title">Admin login</h4>
-            <p class="muted-note muted-note--compact network-subpanel-help">Saved with Wi-Fi below. Leave password blank to keep the current one.</p>
+            <p class="muted-note muted-note--compact network-subpanel-help">Saved with Wi-Fi below. Leave new password blank to keep the current one. Changing username/password requires your current password.</p>
             <div id="adminCredentialsStatus" class="status info" style="display:none;"></div>
             <div class="network-field-grid network-field-grid--pairs">
               <div class="network-field-span-full">
@@ -135,11 +135,19 @@
                 <label for="adminPasswordConfirm">Confirm password</label>
                 <input id="adminPasswordConfirm" type="password" placeholder="Match new password" autocomplete="new-password" data-password="true" />
               </div>
+              <div>
+                <label for="adminCurrentPassword">Current password</label>
+                <input id="adminCurrentPassword" type="password" placeholder="Required to change login" autocomplete="current-password" data-password="true" />
+              </div>
+              <div id="adminCurrentTotpWrap" style="display:none;">
+                <label for="adminCurrentTotp">Authenticator code</label>
+                <input id="adminCurrentTotp" type="text" inputmode="numeric" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
+              </div>
             </div>
             <div class="metric-cluster-divider" aria-hidden="true"></div>
             <h4 class="metric-cluster-title">Two-factor authentication</h4>
             <p class="muted-note muted-note--compact network-subpanel-help" id="totpHelp">
-              Optional authenticator-app codes (Google Authenticator, Aegis, etc.) for Settings login.
+              Strongly recommended. Authenticator-app codes protect login, wallet send/backup, mining payout changes, and device updates (Google Authenticator, Aegis, etc.).
             </p>
             <div id="totpStatus" class="status info" style="display:none;"></div>
             <p class="muted-note muted-note--compact" id="totpStateLabel">Status: checking…</p>
@@ -205,6 +213,15 @@
             <input id="miningPayoutAddress" type="text" inputmode="text" spellcheck="false" placeholder="bc1..." autocomplete="off" />
             <div class="muted-note muted-note--compact btn-spaced">
               Saving updates DATUM and restarts mining. Generated addresses use the portal wallet — export a backup from /wallet.
+              Changing payout requires re-entering your admin password.
+            </div>
+            <label for="miningPayoutUsername">Admin username</label>
+            <input id="miningPayoutUsername" type="text" autocomplete="username" />
+            <label for="miningPayoutPassword">Admin password</label>
+            <input id="miningPayoutPassword" type="password" autocomplete="current-password" data-password="true" />
+            <div id="miningPayoutTotpWrap" style="display:none;">
+              <label for="miningPayoutTotp">Authenticator code</label>
+              <input id="miningPayoutTotp" type="text" inputmode="numeric" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
             </div>
             <button class="btn secondary btn-spaced" type="submit">Save payout address</button>
             <button class="btn secondary btn-spaced" type="button" id="miningPayoutGenerateBtn">Generate from this node</button>
@@ -288,6 +305,17 @@
           <div class="settings-actions-buttons settings-actions-buttons--pair" role="group" aria-label="Device actions">
             <button type="button" class="btn secondary" id="updateDeviceBtn" onclick="updateDevice()" title="Update device">Update device</button>
             <button type="button" class="btn secondary" onclick="reboot()">Reboot</button>
+          </div>
+          <div class="btn-spaced">
+            <p class="muted-note muted-note--compact">Update and factory reset require your admin password again.</p>
+            <label for="actionStepUpUsername">Admin username</label>
+            <input id="actionStepUpUsername" type="text" autocomplete="username" />
+            <label for="actionStepUpPassword">Admin password</label>
+            <input id="actionStepUpPassword" type="password" autocomplete="current-password" data-password="true" />
+            <div id="actionStepUpTotpWrap" style="display:none;">
+              <label for="actionStepUpTotp">Authenticator code</label>
+              <input id="actionStepUpTotp" type="text" inputmode="numeric" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
+            </div>
           </div>
           <div class="settings-actions-buttons settings-actions-buttons--stack" role="group" aria-label="Factory reset">
             <button type="button" class="btn danger" onclick="factoryReset()">Factory reset</button>

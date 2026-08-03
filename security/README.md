@@ -2,12 +2,19 @@
 
 Device updates refuse to apply unless:
 
-1. `git remote get-url origin` matches `ota-allowed-remotes.txt`
-2. The tip commit on `origin/<branch>` verifies with `git verify-commit` against `ota-allowed-signers`
+1. `git remote get-url origin` matches the allowlist
+2. The tip commit on `origin/<branch>` verifies with `git verify-commit` against trusted signers
+
+On devices, verification runs **only** via root-owned `/usr/lib/blockvase/verify-ota-update.sh`, using allowlists installed to:
+
+- `/etc/blockvase/ota-allowed-remotes.txt`
+- `/etc/blockvase/ota-allowed-signers`
+
+Bootstrap copies those from `security/` as root. Do **not** keep the OTA private signing key on appliances (`~/.blockvase-secrets/ota-signing` is stripped by bootstrap, live hardening, and `prepare-clone`).
 
 ## Signing releases (maintainers)
 
-Use an SSH key listed in `ota-allowed-signers` (ed25519). Example one-shot commit (does not rewrite git config):
+Use an offline/dedicated signing host. Keep the private key listed in `ota-allowed-signers` (ed25519) out of manufactured images. Example one-shot commit (does not rewrite git config):
 
 ```bash
 git -c gpg.format=ssh \
@@ -23,7 +30,14 @@ scripts/verify-ota-update.sh HEAD
 git push origin HEAD:main   # requires repo Admin (ruleset bypass)
 ```
 
-The matching public key is `security/ota-signing.pub`. Keep the private key offline/out of the repo.
+The matching public key is `security/ota-signing.pub`. Keep the private key offline/out of the repo and off customer devices.
+
+## Portal threat notes
+
+- Portal listens on LAN HTTP by design; do not port-forward `:80` to the internet.
+- Enable TOTP in Settings after setup; login and step-up are rate-limited.
+- Changing admin password, mining payout, wallet send/backup, factory reset, and device update require password re-entry (+ TOTP when enabled).
+- Optional host firewall: only enable UFW if you understand your LAN management path (SSH/Cursor can be locked out).
 
 ## GitHub: PR-only `main`, open PRs for anyone
 

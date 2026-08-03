@@ -243,7 +243,21 @@ for _bv_script in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-min
     ${SUDO} install -o root -g root -m 755 "${PROJECT_DIR}/scripts/${_bv_script}" "/usr/lib/blockvase/${_bv_script}"
   fi
 done
+# Root-owned OTA allowlists (device-update must not trust user-writable copies alone).
+if [[ -f "${PROJECT_DIR}/security/ota-allowed-remotes.txt" ]]; then
+  ${SUDO} install -o root -g root -m 644 \
+    "${PROJECT_DIR}/security/ota-allowed-remotes.txt" /etc/blockvase/ota-allowed-remotes.txt
+fi
+if [[ -f "${PROJECT_DIR}/security/ota-allowed-signers" ]]; then
+  ${SUDO} install -o root -g root -m 644 \
+    "${PROJECT_DIR}/security/ota-allowed-signers" /etc/blockvase/ota-allowed-signers
+fi
 ${SUDO} chmod +x "${PROJECT_DIR}/scripts/verify-ota-update.sh" 2>/dev/null || true
+# Appliances must not keep the OTA private signing key (maintainers sign offline).
+if [[ -e "/home/${SERVICE_USER}/.blockvase-secrets/ota-signing" ]]; then
+  echo "       → Removing appliance OTA private key from /home/${SERVICE_USER}/.blockvase-secrets"
+  ${SUDO} rm -f "/home/${SERVICE_USER}/.blockvase-secrets/ota-signing"
+fi
 # Portal/group needs read access to bitcoin.conf for RPC (password not mirrored into config.json).
 if getent group bitcoin >/dev/null 2>&1; then
   ${SUDO} usermod -aG bitcoin "${SERVICE_USER}" 2>/dev/null || true

@@ -20,7 +20,17 @@ for s in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-miner-refres
     install -o root -g root -m 755 "${PROJECT_DIR}/scripts/${s}" "/usr/lib/blockvase/${s}"
   fi
 done
+if [[ -f "${PROJECT_DIR}/security/ota-allowed-remotes.txt" ]]; then
+  install -o root -g root -m 644 \
+    "${PROJECT_DIR}/security/ota-allowed-remotes.txt" /etc/blockvase/ota-allowed-remotes.txt
+fi
+if [[ -f "${PROJECT_DIR}/security/ota-allowed-signers" ]]; then
+  install -o root -g root -m 644 \
+    "${PROJECT_DIR}/security/ota-allowed-signers" /etc/blockvase/ota-allowed-signers
+fi
 chmod +x "${PROJECT_DIR}/scripts/verify-ota-update.sh" 2>/dev/null || true
+# Appliances must not keep the OTA private signing key.
+rm -f "/home/${SERVICE_USER}/.blockvase-secrets/ota-signing" 2>/dev/null || true
 # Drop blanket sudo from %sudo; keep NOPASSWD appliance rules below.
 if id -nG "${SERVICE_USER}" 2>/dev/null | tr ' ' '\n' | grep -qx sudo; then
   gpasswd -d "${SERVICE_USER}" sudo 2>/dev/null || true
@@ -108,6 +118,8 @@ systemctl restart blockvase-miner.service || true
 
 echo "Live security hardening applied."
 echo "  - /usr/lib/blockvase scripts + sudoers"
+echo "  - root-owned OTA allowlists under /etc/blockvase"
+echo "  - appliance OTA private key removed (if present)"
 echo "  - root-owned bitcoind.service + AmbientCapabilities portal unit"
 echo "  - setcap removed from system Python (if present)"
 echo "  - wifi.secret migrated into wifi_password_enc"

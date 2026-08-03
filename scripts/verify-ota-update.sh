@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Verify origin remote + signed tip before applying a device update.
-# Usage (from project dir, as service user or root):
+# Usage:
 #   scripts/verify-ota-update.sh <ref>   e.g. origin/main
+#   /usr/lib/blockvase/verify-ota-update.sh <ref>
+#
+# Prefer root-owned allowlists under /etc/blockvase/ (installed by bootstrap)
+# so a compromised service user cannot rewrite trusted remotes/signers.
 set -euo pipefail
 
 REF="${1:?ref required (e.g. origin/main)}"
@@ -17,11 +21,22 @@ fi
 
 cd "${PROJECT_DIR}"
 
-ALLOWED_REMOTES="${PROJECT_DIR}/security/ota-allowed-remotes.txt"
-ALLOWED_SIGNERS="${PROJECT_DIR}/security/ota-allowed-signers"
+pick_allowlist() {
+  local name="$1"
+  if [[ -f "/etc/blockvase/${name}" ]]; then
+    echo "/etc/blockvase/${name}"
+  elif [[ -f "${PROJECT_DIR}/security/${name}" ]]; then
+    echo "${PROJECT_DIR}/security/${name}"
+  else
+    echo ""
+  fi
+}
 
-if [[ ! -f "${ALLOWED_REMOTES}" ]]; then
-  echo "ERROR: missing ${ALLOWED_REMOTES}" >&2
+ALLOWED_REMOTES="$(pick_allowlist "ota-allowed-remotes.txt")"
+ALLOWED_SIGNERS="$(pick_allowlist "ota-allowed-signers")"
+
+if [[ -z "${ALLOWED_REMOTES}" ]]; then
+  echo "ERROR: missing ota-allowed-remotes.txt under /etc/blockvase or ${PROJECT_DIR}/security" >&2
   exit 1
 fi
 
@@ -59,8 +74,8 @@ if [[ -z "${TIP}" ]]; then
   exit 1
 fi
 
-if [[ ! -f "${ALLOWED_SIGNERS}" ]]; then
-  echo "ERROR: missing ${ALLOWED_SIGNERS}" >&2
+if [[ -z "${ALLOWED_SIGNERS}" || ! -f "${ALLOWED_SIGNERS}" ]]; then
+  echo "ERROR: missing ota-allowed-signers under /etc/blockvase or ${PROJECT_DIR}/security" >&2
   exit 1
 fi
 
@@ -83,6 +98,6 @@ if ! git verify-commit "${TIP}" >/tmp/blockvase-ota-verify.out 2>&1; then
   exit 1
 fi
 
-echo "OTA verify OK: remote=${ORIGIN_URL} tip=${TIP}"
+echo "OTA verify OK: remote=${ORIGIN_URL} tip=${TIP} remotes_file=${ALLOWED_REMOTES} signers_file=${ALLOWED_SIGNERS}"
 cat /tmp/blockvase-ota-verify.out || true
 rm -f /tmp/blockvase-ota-verify.out
