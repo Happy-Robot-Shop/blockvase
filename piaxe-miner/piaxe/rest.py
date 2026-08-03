@@ -110,7 +110,7 @@ class RestAPI:
         host = self.config.get("host", "127.0.0.1")
         port = int(self.config.get("port", "5000"))
         def run_app():
-            self.app.run(host=host, port=port, debug=True, use_reloader=False)
+            self.app.run(host=host, port=port, debug=False, use_reloader=False)
 
         self.server_thread = threading.Thread(target=run_app)
         self.server_thread.start()

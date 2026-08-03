@@ -85,10 +85,10 @@ class StateManager:
     def _poll_loop(self) -> None:
         previous_height = None
         while not self._stop.is_set():
-            cfg = load_config()
-            rpc_cfg = cfg.get("rpc", {})
             now = int(time.time())
             try:
+                cfg = load_config()
+                rpc_cfg = cfg.get("rpc", {})
                 metrics = self.rpc.collect_metrics(rpc_cfg)
                 height = metrics.get("blocks")
                 with self.state.lock:
@@ -112,8 +112,8 @@ class StateManager:
                     else:
                         self.state.metrics = {
                             "connected": False,
-                            "rpc_status_code": self.rpc.last_error.http_status,
-                            "rpc_error_body": self.rpc.last_error.body_snippet,
+                            "rpc_status_code": getattr(self.rpc.last_error, "http_status", None),
+                            "rpc_error_body": getattr(self.rpc.last_error, "body_snippet", None),
                             "node_version": cli_ver,
                         }
                     self.state.last_update_ts = now

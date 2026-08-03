@@ -14,6 +14,9 @@ WorkingDirectory=__PROJECT_DIR__
 Environment=PYTHONUNBUFFERED=1
 Environment=ENABLE_SYSTEM_ACTIONS=true
 Environment=BLOCKVASE_PORT=80
+# Bind :80 without setcap on system Python (scoped to this unit only).
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ExecStart=__PROJECT_DIR__/scripts/run.sh
 Restart=always
 RestartSec=3

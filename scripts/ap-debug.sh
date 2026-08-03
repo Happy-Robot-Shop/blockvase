@@ -20,4 +20,4 @@ echo "4. ${WLAN} address:"
 ip -4 addr show "${WLAN}" 2>/dev/null || true
 echo
 echo "5. Restart AP / client: sudo systemctl restart blockvase-ap"
-echo "   Password (hotspot): blockvase1234"
+echo "   Password (hotspot): per-device value in data/config.json ap_password (also in setup QR)"

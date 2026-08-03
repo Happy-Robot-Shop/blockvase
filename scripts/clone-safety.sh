@@ -372,20 +372,29 @@ if path.exists():
 cfg["setup_complete"] = False
 cfg["wifi_recovery"] = False
 cfg["wifi_ssid"] = ""
-cfg["wifi_password"] = ""
+cfg.pop("wifi_password", None)
+cfg["wifi_password_enc"] = ""
 cfg["setup_token"] = secrets.token_urlsafe(16)
+cfg["session_token"] = ""
+cfg["ap_password"] = secrets.token_urlsafe(12)
 cfg["admin_username"] = ""
 cfg["admin_password_hash"] = ""
 cfg["mining_payout_address"] = ""
 cfg.pop("mining_simulation_enabled", None)
 cfg.setdefault("device_name", "blockvase")
+if isinstance(cfg.get("rpc"), dict):
+    cfg["rpc"]["password"] = ""
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+wifi_secret = path.parent / "wifi.secret"
+if wifi_secret.exists():
+    wifi_secret.unlink()
 print("setup_complete=false")
 print("wifi credentials cleared")
 print("admin credentials cleared")
 print("mining payout cleared")
 print("setup_token regenerated")
+print("ap_password regenerated")
 PY
   local owner="blockvase"
   if id -u blockvase >/dev/null 2>&1; then
@@ -395,6 +404,7 @@ PY
   fi
   chown "${owner}:${owner}" "$CONFIG_JSON" 2>/dev/null || true
   chmod 600 "$CONFIG_JSON" 2>/dev/null || true
+  rm -f "$(dirname "$CONFIG_JSON")/wifi.secret" 2>/dev/null || true
 
   # Record fingerprint NOW so rebooting this master before imaging does not
   # full-expand the drive. Clones on a different disk/serial will mismatch.

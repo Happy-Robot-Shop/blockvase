@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import secrets
 import threading
@@ -10,21 +12,29 @@ from typing import Any
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_PATH = DATA_DIR / "config.json"
+# Legacy sidecar (migrated into wifi_password_enc); may be root-owned on older images.
+WIFI_SECRET_PATH = DATA_DIR / "wifi.secret"
 
 
 # JSON-RPC always targets local Bitcoin Knots (see scripts/install-bitcoin-knots.sh); credentials live in
-# /etc/bitcoin/bitcoin.conf and are merged in load_config().
+# /etc/bitcoin/bitcoin.conf and are merged in memory by load_config() (not persisted to config.json).
 DEFAULT_CONFIG: dict[str, Any] = {
     "device_name": "blockvase",
     "theme": "default",
     "display_offset_x": 0,
     "wifi_ssid": "",
+    # Runtime-only; persisted as wifi_password_enc (machine-bound seal), never plaintext in JSON.
     "wifi_password": "",
+    "wifi_password_enc": "",
     "setup_complete": False,
     # Soft offline recovery: show setup QR/hotspot while keeping setup_complete + Wi-Fi secrets
     # so the device can keep retrying the saved network and leave setup when it reconnects.
     "wifi_recovery": False,
     "setup_token": "",
+    # Per-device setup AP PSK (also encoded in the connect QR). Not a shared factory default.
+    "ap_password": "",
+    # Post-login / post-credential session secret (cookie). Distinct from setup_token QR capability.
+    "session_token": "",
     "admin_username": "",
     "admin_password_hash": "",
     "mining_payout_address": "",
@@ -81,7 +91,7 @@ _lock = threading.Lock()
 
 
 def hardware_ap_suffix() -> str:
-    """Stable 6-char id from wlan/eth MAC or machine-id (for AP SSID when token missing)."""
+    """Stable 6-char id from wlan/eth MAC or machine-id (for AP SSID uniqueness)."""
     for name in ("wlan0", "wlan1", "eth0"):
         p = Path(f"/sys/class/net/{name}/address")
         if not p.exists():
@@ -101,16 +111,60 @@ def hardware_ap_suffix() -> str:
     return "init"
 
 
-def ap_broadcast_ssid(cfg: dict[str, Any]) -> str:
-    """SSID for setup-mode AP: blockvase-<6 chars> so multiple units in one room differ."""
-    t = str(cfg.get("setup_token", "") or "").strip()
-    if len(t) >= 6:
-        return f"blockvase-{t[:6]}"
+def ap_broadcast_ssid(cfg: dict[str, Any] | None = None) -> str:
+    """SSID for setup-mode AP: blockvase-<hardware id> (does not leak setup_token)."""
+    del cfg  # API compatibility with call sites that pass cfg
     return f"blockvase-{hardware_ap_suffix()}"
+
+
+def generate_ap_password() -> str:
+    """WPA2 PSK: url-safe chars (within 8–63), unique per device."""
+    return secrets.token_urlsafe(12)
+
+
+def _device_seal_key() -> bytes:
+    try:
+        mid = Path("/etc/machine-id").read_text(encoding="ascii").strip()
+    except OSError:
+        mid = "blockvase"
+    return hashlib.sha256(f"blockvase-wifi-v1:{mid}".encode("utf-8")).digest()
+
+
+def _seal_secret(plaintext: str) -> str:
+    if not plaintext:
+        return ""
+    key = _device_seal_key()
+    raw = plaintext.encode("utf-8")
+    sealed = bytes(b ^ key[i % len(key)] for i, b in enumerate(raw))
+    return base64.urlsafe_b64encode(sealed).decode("ascii")
+
+
+def _unseal_secret(blob: str) -> str:
+    if not blob:
+        return ""
+    try:
+        sealed = base64.urlsafe_b64decode(blob.encode("ascii"))
+    except (ValueError, TypeError):
+        return ""
+    key = _device_seal_key()
+    raw = bytes(b ^ key[i % len(key)] for i, b in enumerate(sealed))
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return ""
 
 
 def _ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _read_legacy_wifi_secret_file() -> str:
+    try:
+        if WIFI_SECRET_PATH.is_file():
+            return WIFI_SECRET_PATH.read_text(encoding="utf-8").strip("\n")
+    except OSError:
+        pass
+    return ""
 
 
 def load_config() -> dict[str, Any]:
@@ -124,22 +178,52 @@ def load_config() -> dict[str, Any]:
     merged = json.loads(json.dumps(DEFAULT_CONFIG))
     merged.update({k: v for k, v in raw.items() if k != "rpc"})
     merged["rpc"].update(raw.get("rpc", {}))
+    # Never trust persisted RPC password; load from bitcoind conf when readable.
+    merged["rpc"]["password"] = ""
     _apply_local_rpc(merged)
+
+    wifi_pw = _unseal_secret(str(merged.get("wifi_password_enc", "") or ""))
+    if not wifi_pw:
+        wifi_pw = str(raw.get("wifi_password", "") or "")
+    if not wifi_pw:
+        wifi_pw = _read_legacy_wifi_secret_file()
+    merged["wifi_password"] = wifi_pw
+
+    dirty = False
+    if wifi_pw and not merged.get("wifi_password_enc"):
+        merged["wifi_password_enc"] = _seal_secret(wifi_pw)
+        dirty = True
     if not merged.get("setup_token"):
         merged["setup_token"] = secrets.token_urlsafe(16)
+        dirty = True
+    if not merged.get("ap_password") or merged.get("ap_password") == "blockvase1234":
+        merged["ap_password"] = generate_ap_password()
+        dirty = True
+    if dirty:
         save_config(merged)
     return merged
 
 
 def save_config(config: dict[str, Any]) -> None:
     _ensure_dirs()
+    wifi_password = str(config.get("wifi_password", "") or "")
+    if "wifi_password" in config or wifi_password:
+        config["wifi_password_enc"] = _seal_secret(wifi_password)
+
     _apply_local_rpc(config)
+    to_disk = json.loads(json.dumps(config))
+    to_disk.pop("wifi_password", None)
+    if isinstance(to_disk.get("rpc"), dict):
+        to_disk["rpc"]["password"] = ""
+
     with _lock:
         with CONFIG_PATH.open("w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, sort_keys=True)
+            json.dump(to_disk, f, indent=2, sort_keys=True)
             f.write("\n")
         try:
             CONFIG_PATH.chmod(0o600)
         except OSError:
             pass
-
+    config["wifi_password"] = wifi_password or _unseal_secret(
+        str(config.get("wifi_password_enc", "") or "")
+    )

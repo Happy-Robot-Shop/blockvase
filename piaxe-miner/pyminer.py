@@ -646,12 +646,20 @@ if __name__ == '__main__':
       logging.info("Payout address not configured: monitoring only; retrying in 30s")
       time.sleep(30)
       continue
+    pyminer = None
     try:
       pyminer = Miner(options.url, username, password, piaxeMiner, suggest_difficulty)
       pyminer.serve()
     except Exception as e:
-      logging.error("exception in serve ... restarting client")
-      pyminer.error_event.set()
+      logging.error("exception in serve ... restarting client: %s", e)
+      if pyminer is not None:
+        try:
+          pyminer.error_event.set()
+        except Exception:
+          pass
+      else:
+        time.sleep(5)
+        continue
 
     logging.debug("waiting for error")
     pyminer.error_event.wait()

@@ -332,8 +332,8 @@ After setup:
 
 | | |
 |---|---|
-| **SSID** | `blockvase-` + 6 characters (shown on the QR / Settings) |
-| **Password** | `blockvase1234` |
+| **SSID** | `blockvase-` + last 6 hex chars of the Wi‑Fi MAC (unique per device) |
+| **Password** | Per-device value stored as `ap_password` in config (shown in the connect QR / `/api/ap-info` only while setup AP is active) |
 | **Setup page** | Usually `http://192.168.4.1/setup?token=...` while connected to the hotspot |
 
 If home Wi-Fi join fails (at setup or later if Wi-Fi drops), the device returns to setup AP mode and shows the setup QR on the display so you can reconnect and fix it.
@@ -466,7 +466,7 @@ A fully black screen from power-on is not guaranteed on stock Pi OS without a cu
 1. SSH over Ethernet: `ssh blockvase@<pi-eth0-ip>`
 2. `sudo ~/blockvase/scripts/ap-debug.sh`
 3. `sudo systemctl restart blockvase-ap.service`
-4. Connect manually to `blockvase-<suffix>`, password `blockvase1234`
+4. Connect manually to `blockvase-<suffix>` using the per-device password from the on-device connect QR (or Settings AP info while in setup mode)
 5. Confirm NetworkManager: `sudo systemctl status NetworkManager`
 6. Outside the US: set Wi-Fi country with `sudo raspi-config` → Localisation Options → WLAN Country
 

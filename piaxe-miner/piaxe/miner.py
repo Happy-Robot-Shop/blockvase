@@ -12,6 +12,7 @@ import os
 import math
 import yaml
 import json
+from pathlib import Path
 
 import threading
 import queue
@@ -188,6 +189,11 @@ class BM1366Miner:
             ramp["pause_temp_c"] = float(pause_temp)
             ramp["cooldown_temp_c"] = float(board_cfg.get("frequency_ramp_cooldown_temp_c", 62.0))
             ramp["temp_reader"] = self.hardware.read_temperature_and_voltage
+        cool = self._active_thermal_cooldown()
+        if cool:
+            start = float(cool.get("start_mhz") or getattr(self, "_thermal_gov_min_mhz", None) or ramp["start_mhz"])
+            ramp["start_mhz"] = start
+            logging.info("thermal cooldown active: frequency ramp starts at %.2f MHz", start)
         return ramp
 
     def _start_rest_api(self):
@@ -540,10 +546,54 @@ class BM1366Miner:
                         temp["temp"][i],
                         self.max_board_temp_c,
                     )
+                    self._record_thermal_trip(temp["temp"][i])
                     self.hardware.shutdown()
                     os._exit(1)
 
             time.sleep(1.5)
+
+    def _thermal_trip_path(self):
+        return Path(os.environ.get("BLOCKVASE_THERMAL_TRIP_PATH", "/var/lib/blockvase/thermal-trip.json"))
+
+    def _record_thermal_trip(self, board_temp):
+        """Persist cooldown so restarts do not immediately re-ramp to max MHz."""
+        try:
+            path = self._thermal_trip_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            board_cfg = self.config.get(self.miner, {})
+            cooldown_sec = float(board_cfg.get("thermal_trip_cooldown_sec", 300.0))
+            start_mhz = float(getattr(self, "_thermal_gov_min_mhz", 300.0) or 300.0)
+            payload = {
+                "tripped_at": time.time(),
+                "resume_after": time.time() + max(60.0, cooldown_sec),
+                "board_temp_c": float(board_temp),
+                "start_mhz": start_mhz,
+            }
+            path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+            logging.warning(
+                "thermal trip recorded: cooldown until +%.0fs, restart ramp from %.2f MHz",
+                cooldown_sec,
+                payload["start_mhz"],
+            )
+        except Exception as ex:
+            logging.warning("failed to record thermal trip: %s", ex)
+
+    def _active_thermal_cooldown(self):
+        try:
+            path = self._thermal_trip_path()
+            if not path.is_file():
+                return None
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            resume_after = float(raw.get("resume_after", 0) or 0)
+            if time.time() >= resume_after:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                return None
+            return raw
+        except Exception:
+            return None
 
     def _thermal_governor_tick(self, board_temp):
         """Step ASIC clock down near trip / up when cool. Hard trip remains last resort."""

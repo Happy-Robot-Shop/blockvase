@@ -79,6 +79,13 @@ if [[ -x "${APPLY_PATCHES}" ]]; then
   "${APPLY_PATCHES}" "${MINER_DIR}"
 fi
 
+echo "       [mining] Stopping miner/DATUM before venv rebuild..."
+systemctl stop blockvase-miner.service 2>/dev/null || true
+systemctl stop datum-gateway.service 2>/dev/null || true
+# Ensure pyminer is not holding the old venv open.
+pkill -f "${MINER_DIR}/pyminer.py" 2>/dev/null || true
+sleep 1
+
 echo "       [mining] PiAxe-miner Python venv..."
 # --system-site-packages: Pi 5+ needs distro RPi/GPIO shim (python3-rpi-lgpio); do not pip-install RPi.GPIO (wrong SoC pins).
 rm -rf "${MINER_DIR}/.venv"
@@ -99,8 +106,8 @@ TMP_M="$(mktemp)"
 sed "s|__SERVICE_USER__|${SERVICE_USER}|g" "${PROJECT_DIR}/systemd/datum-gateway.service" >"${TMP_D}"
 sed "s|__PROJECT_DIR__|${PROJECT_DIR}|g; s|__SERVICE_USER__|${SERVICE_USER}|g" \
   "${PROJECT_DIR}/systemd/blockvase-miner.service" >"${TMP_M}"
-cp "${TMP_D}" /etc/systemd/system/datum-gateway.service
-cp "${TMP_M}" /etc/systemd/system/blockvase-miner.service
+install -o root -g root -m 644 "${TMP_D}" /etc/systemd/system/datum-gateway.service
+install -o root -g root -m 644 "${TMP_M}" /etc/systemd/system/blockvase-miner.service
 rm -f "${TMP_D}" "${TMP_M}"
 
 chmod +x "${PROJECT_DIR}/scripts/set-mining-payout.sh"
@@ -111,11 +118,13 @@ ADDRESS_FILE="/etc/blockvase/solo_mining_address"
 # Miner is always enabled: board/ASIC monitoring stays up even without a payout.
 # DATUM requires a valid pool_address, so hashing starts only after Settings saves one.
 BLOCKVASE_SERVICE_USER="${SERVICE_USER}" "${PROJECT_DIR}/scripts/blockvase-miner-refresh-env.sh"
-systemctl enable --now blockvase-miner.service
+systemctl enable blockvase-miner.service
+systemctl restart blockvase-miner.service || systemctl start blockvase-miner.service
 if [[ -s "${ADDRESS_FILE}" ]]; then
   EXISTING_ADDR="$(tr -d '[:space:]' <"${ADDRESS_FILE}")"
   echo "       [mining] Existing payout address found; enabling DATUM + hashing."
   "${PROJECT_DIR}/scripts/set-mining-payout.sh" "${EXISTING_ADDR}"
+  systemctl restart datum-gateway.service 2>/dev/null || true
 else
   systemctl disable --now datum-gateway.service 2>/dev/null || true
   echo "       [mining] Miner enabled (board monitoring). Save a payout address in Settings to start hashing."

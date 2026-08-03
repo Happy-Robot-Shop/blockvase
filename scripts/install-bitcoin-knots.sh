@@ -134,35 +134,36 @@ fi
 
 UNIT_SRC="${PROJECT_DIR}/systemd/bitcoind.service"
 if [[ -f "${UNIT_SRC}" ]]; then
-  cp -a "${UNIT_SRC}" /etc/systemd/system/bitcoind.service
+  # Never cp -a: repo ownership must not land in /etc/systemd/system.
+  install -o root -g root -m 644 "${UNIT_SRC}" /etc/systemd/system/bitcoind.service
 else
   echo "WARNING: ${UNIT_SRC} missing; install systemd/bitcoind.service manually"
 fi
 
+# Portal reads rpcuser/rpcpassword from bitcoin.conf (group bitcoin); do not mirror password into config.json.
+BV_USER="$(stat -c '%U' "${PROJECT_DIR}" 2>/dev/null || echo blockvase)"
+if id -u "${BV_USER}" >/dev/null 2>&1; then
+  usermod -aG bitcoin "${BV_USER}" 2>/dev/null || true
+fi
 CONFIG_JSON="${PROJECT_DIR}/data/config.json"
 if [[ -f "${CONFIG_JSON}" ]] && command -v jq >/dev/null 2>&1; then
-  RPC_PASS_VAL="${RPC_PASS:-}"
-  if [[ -z "${RPC_PASS_VAL}" ]] && [[ -f "${CONF}" ]]; then
-    RPC_PASS_VAL="$(grep -E '^[[:space:]]*rpcpassword=' "${CONF}" | head -1 | cut -d= -f2- | tr -d ' \r')"
-  fi
   RPC_USER_VAL="${RPC_USER}"
   if [[ -f "${CONF}" ]]; then
     u="$(grep -E '^[[:space:]]*rpcuser=' "${CONF}" | head -1 | cut -d= -f2- | tr -d ' \r')"
     [[ -n "${u}" ]] && RPC_USER_VAL="${u}"
   fi
   TMPJ="$(mktemp)"
-  jq --arg u "${RPC_USER_VAL}" --arg p "${RPC_PASS_VAL}" \
-    '.rpc.host = "127.0.0.1" | .rpc.port = 8332 | .rpc.user = $u | .rpc.password = $p | .rpc.use_https = false' \
+  jq --arg u "${RPC_USER_VAL}" \
+    '.rpc.host = "127.0.0.1" | .rpc.port = 8332 | .rpc.user = $u | .rpc.password = "" | .rpc.use_https = false | del(.wifi_password)' \
     "${CONFIG_JSON}" >"${TMPJ}"
   mv "${TMPJ}" "${CONFIG_JSON}"
-  BV_USER="$(stat -c '%U' "${PROJECT_DIR}" 2>/dev/null || echo blockvase)"
   # Must be writable by the blockvase service user; do not swallow chown failures.
   if ! chown "${BV_USER}:${BV_USER}" "${CONFIG_JSON}"; then
     echo "ERROR: chown ${BV_USER} ${CONFIG_JSON} failed, portal cannot save settings." >&2
     exit 1
   fi
   chmod 600 "${CONFIG_JSON}" 2>/dev/null || true
-  echo "Updated ${CONFIG_JSON} rpc block for local Knots."
+  echo "Updated ${CONFIG_JSON} rpc block for local Knots (password loaded from bitcoin.conf at runtime)."
 fi
 
 GATE_SCRIPT="${PROJECT_DIR}/scripts/bitcoind-network-gate.sh"

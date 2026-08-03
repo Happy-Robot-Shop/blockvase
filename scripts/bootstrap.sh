@@ -175,12 +175,19 @@ chmod +x "${PROJECT_DIR}/scripts/kiosk-session.sh"
 [[ -f "${PROJECT_DIR}/scripts/chain-guard.sh" ]] && chmod +x "${PROJECT_DIR}/scripts/chain-guard.sh"
 [[ -f "${PROJECT_DIR}/scripts/check-asic.sh" ]] && chmod +x "${PROJECT_DIR}/scripts/check-asic.sh"
 
-echo "[5/8] Allowing Python to bind to port 80 (so blockvase.local works)..."
+echo "[5/8] Port 80 bind via systemd AmbientCapabilities (not setcap on system Python)..."
+# Drop any prior setcap on the venv/real Python binary from older bootstraps.
 PYTHON_BIN="${PROJECT_DIR}/.venv/bin/python3"
 if [[ -f "${PYTHON_BIN}" ]]; then
   PYTHON_REAL="$(readlink -f "${PYTHON_BIN}" 2>/dev/null || realpath "${PYTHON_BIN}" 2>/dev/null || echo "${PYTHON_BIN}")"
-  ${SUDO:+${SUDO} }setcap 'cap_net_bind_service=+ep' "${PYTHON_REAL}" 2>/dev/null || true
+  ${SUDO:+${SUDO} }setcap -r "${PYTHON_REAL}" 2>/dev/null || true
 fi
+# Also clear mistaken setcap on distro python if present.
+for p in /usr/bin/python3 /usr/bin/python3.13 /usr/bin/python3.12; do
+  if [[ -f "${p}" ]]; then
+    ${SUDO:+${SUDO} }setcap -r "${p}" 2>/dev/null || true
+  fi
+done
 
 echo "[6/8] Configuring Xorg for kiosk..."
 ${SUDO} mkdir -p /etc/X11
@@ -213,19 +220,33 @@ sed "s|__PROJECT_DIR__|${PROJECT_DIR}|g; s|__SERVICE_USER__|${SERVICE_USER}|g" \
 sed "s|__PROJECT_DIR__|${PROJECT_DIR}|g" \
   "${PROJECT_DIR}/systemd/blockvase-chain-guard.service" > "${TMP_CHAIN_GUARD}"
 
-${SUDO} cp "${TMP_BACKEND}" /etc/systemd/system/blockvase.service
-${SUDO} cp "${TMP_KIOSK}" /etc/systemd/system/blockvase-kiosk.service
-${SUDO} cp "${TMP_AP}" /etc/systemd/system/blockvase-ap.service
-${SUDO} cp "${PROJECT_DIR}/systemd/blockvase-switch-to-kiosk-vt.service" /etc/systemd/system/blockvase-switch-to-kiosk-vt.service
-${SUDO} cp "${PROJECT_DIR}/systemd/bitcoind.service" /etc/systemd/system/bitcoind.service
-${SUDO} cp "${TMP_CHAIN_GUARD}" /etc/systemd/system/blockvase-chain-guard.service
-${SUDO} cp "${PROJECT_DIR}/systemd/blockvase-chain-guard.timer" /etc/systemd/system/blockvase-chain-guard.timer
+${SUDO} install -o root -g root -m 644 "${TMP_BACKEND}" /etc/systemd/system/blockvase.service
+${SUDO} install -o root -g root -m 644 "${TMP_KIOSK}" /etc/systemd/system/blockvase-kiosk.service
+${SUDO} install -o root -g root -m 644 "${TMP_AP}" /etc/systemd/system/blockvase-ap.service
+${SUDO} install -o root -g root -m 644 "${PROJECT_DIR}/systemd/blockvase-switch-to-kiosk-vt.service" /etc/systemd/system/blockvase-switch-to-kiosk-vt.service
+${SUDO} install -o root -g root -m 644 "${PROJECT_DIR}/systemd/bitcoind.service" /etc/systemd/system/bitcoind.service
+${SUDO} install -o root -g root -m 644 "${TMP_CHAIN_GUARD}" /etc/systemd/system/blockvase-chain-guard.service
+${SUDO} install -o root -g root -m 644 "${PROJECT_DIR}/systemd/blockvase-chain-guard.timer" /etc/systemd/system/blockvase-chain-guard.timer
 TMP_WIFI_WATCH="$(mktemp)"
 sed "s|__PROJECT_DIR__|${PROJECT_DIR}|g" \
   "${PROJECT_DIR}/systemd/blockvase-wifi-watch.service" > "${TMP_WIFI_WATCH}"
-${SUDO} cp "${TMP_WIFI_WATCH}" /etc/systemd/system/blockvase-wifi-watch.service
-${SUDO} cp "${PROJECT_DIR}/systemd/blockvase-wifi-watch.timer" /etc/systemd/system/blockvase-wifi-watch.timer
+${SUDO} install -o root -g root -m 644 "${TMP_WIFI_WATCH}" /etc/systemd/system/blockvase-wifi-watch.service
+${SUDO} install -o root -g root -m 644 "${PROJECT_DIR}/systemd/blockvase-wifi-watch.timer" /etc/systemd/system/blockvase-wifi-watch.timer
 rm -f "${TMP_BACKEND}" "${TMP_KIOSK}" "${TMP_AP}" "${TMP_CHAIN_GUARD}" "${TMP_WIFI_WATCH}"
+
+# Root-owned copies of NOPASSWD scripts so the service user cannot rewrite them for root.
+${SUDO} mkdir -p /usr/lib/blockvase /etc/blockvase
+echo "${PROJECT_DIR}" | ${SUDO} tee /etc/blockvase/project-dir >/dev/null
+${SUDO} chmod 644 /etc/blockvase/project-dir
+for _bv_script in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-miner-refresh-env.sh; do
+  if [[ -f "${PROJECT_DIR}/scripts/${_bv_script}" ]]; then
+    ${SUDO} install -o root -g root -m 755 "${PROJECT_DIR}/scripts/${_bv_script}" "/usr/lib/blockvase/${_bv_script}"
+  fi
+done
+# Portal/group needs read access to bitcoin.conf for RPC (password not mirrored into config.json).
+if getent group bitcoin >/dev/null 2>&1; then
+  ${SUDO} usermod -aG bitcoin "${SERVICE_USER}" 2>/dev/null || true
+fi
 
 if [[ ! -f "${PROJECT_DIR}/systemd/blockvase-chain-guard.service" ]] || [[ ! -f "${PROJECT_DIR}/systemd/blockvase-chain-guard.timer" ]]; then
   echo "WARNING: blockvase-chain-guard systemd units missing; automatic chain recovery will not run."
@@ -300,22 +321,30 @@ else
 fi
 
 echo "[8/8] Enabling services..."
+# Ensure portal can create/update sealed secrets under data/.
+${SUDO} mkdir -p "${PROJECT_DIR}/data"
+${SUDO} chown "${SERVICE_USER}:${SERVICE_USER}" "${PROJECT_DIR}/data" 2>/dev/null || true
+${SUDO} chmod 755 "${PROJECT_DIR}/data" 2>/dev/null || true
+if [[ -f "${PROJECT_DIR}/data/config.json" ]]; then
+  ${SUDO} chown "${SERVICE_USER}:${SERVICE_USER}" "${PROJECT_DIR}/data/config.json" 2>/dev/null || true
+  ${SUDO} chmod 600 "${PROJECT_DIR}/data/config.json" 2>/dev/null || true
+fi
+${SUDO} rm -f "${PROJECT_DIR}/data/wifi.secret" 2>/dev/null || true
 ${SUDO} systemctl daemon-reload
 ${SUDO} loginctl enable-linger "${SERVICE_USER}" || true
 ${SUDO} systemctl enable --now NetworkManager 2>/dev/null || true
-echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: ${PROJECT_DIR}/scripts/ap-mode.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-ap >/dev/null
-echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: ${PROJECT_DIR}/scripts/set-mining-payout.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-mining-payout >/dev/null
-echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: ${PROJECT_DIR}/scripts/blockvase-miner-refresh-env.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-miner-env >/dev/null
-echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: ${PROJECT_DIR}/scripts/device-update.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-device-update >/dev/null
-echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop blockvase-miner.service, /usr/bin/systemctl start blockvase-miner.service" | ${SUDO} tee /etc/sudoers.d/blockvase-check-asic >/dev/null
+echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/ap-mode.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-ap >/dev/null
+echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/set-mining-payout.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-mining-payout >/dev/null
+echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/blockvase-miner-refresh-env.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-miner-env >/dev/null
+echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/device-update.sh" | ${SUDO} tee /etc/sudoers.d/blockvase-device-update >/dev/null
+echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop blockvase-miner.service, /usr/bin/systemctl start blockvase-miner.service, /usr/bin/systemctl restart blockvase-miner.service" | ${SUDO} tee /etc/sudoers.d/blockvase-check-asic >/dev/null
 {
   echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/sbin/reboot"
   echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/reboot"
   echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/hostnamectl"
 } | ${SUDO} tee /etc/sudoers.d/blockvase-reboot >/dev/null
 ${SUDO} chmod 440 /etc/sudoers.d/blockvase-ap /etc/sudoers.d/blockvase-mining-payout /etc/sudoers.d/blockvase-miner-env /etc/sudoers.d/blockvase-device-update /etc/sudoers.d/blockvase-check-asic /etc/sudoers.d/blockvase-reboot
-${SUDO} chmod 755 "${PROJECT_DIR}/scripts/device-update.sh" 2>/dev/null || true
-# Drop obsolete iptables port-redirect sudoers if present from older bootstraps.
+# Drop obsolete sudoers (repo-path scripts / unrestricted hostnamectl / port-redirect).
 ${SUDO} rm -f /etc/sudoers.d/blockvase-port-redirect
 if ${SUDO} command -v ufw >/dev/null 2>&1 && ${SUDO} ufw status | grep -q "Status: active"; then
   ${SUDO} ufw allow in on wlan0 proto udp to any port 67 || true

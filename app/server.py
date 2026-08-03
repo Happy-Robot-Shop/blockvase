@@ -20,7 +20,16 @@ from qrcode.image.svg import SvgImage
 from waitress import serve
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .config import BASE_DIR, CONFIG_PATH, DEFAULT_CONFIG, _apply_local_rpc, ap_broadcast_ssid, load_config, save_config
+from .config import (
+    BASE_DIR,
+    CONFIG_PATH,
+    DEFAULT_CONFIG,
+    _apply_local_rpc,
+    ap_broadcast_ssid,
+    generate_ap_password,
+    load_config,
+    save_config,
+)
 from .mining_metrics import fetch_mining_metrics
 from .state import StateManager
 
@@ -30,9 +39,22 @@ state = StateManager()
 _log = logging.getLogger("blockvase")
 MINING_PAYOUT_PATH = Path("/etc/blockvase/solo_mining_address")
 UPDATE_STATUS_PATH = Path("/var/lib/blockvase/update-status.json")
-DEVICE_UPDATE_SCRIPT = BASE_DIR / "scripts" / "device-update.sh"
+# Prefer root-owned install path from bootstrap (NOPASSWD targets); fall back to repo copy.
+_LIB_DIR = Path("/usr/lib/blockvase")
+DEVICE_UPDATE_SCRIPT = (
+    _LIB_DIR / "device-update.sh"
+    if (_LIB_DIR / "device-update.sh").is_file()
+    else BASE_DIR / "scripts" / "device-update.sh"
+)
 ADMIN_COOKIE_NAME = "blockvase_admin"
 ADMIN_COOKIE_MAX_AGE = 60 * 60 * 24 * 30
+
+
+def _privileged_script(name: str) -> Path:
+    lib = _LIB_DIR / name
+    if lib.is_file():
+        return lib
+    return BASE_DIR / "scripts" / name
 _UPDATE_STALE_RUNNING_SEC = 2 * 60 * 60
 _UPDATE_SUCCESS_HOLD_SEC = 12
 _UPDATE_FAILED_HOLD_SEC = 120
@@ -51,14 +73,23 @@ _update_availability: dict[str, Any] = {
 }
 
 
+def _request_origin_host() -> str | None:
+    origin = request.headers.get("Origin")
+    if origin:
+        return urlparse(origin).netloc or None
+    referer = request.headers.get("Referer")
+    if referer:
+        return urlparse(referer).netloc or None
+    return None
+
+
 @app.before_request
 def _start_request_timer():
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-        origin = request.headers.get("Origin")
-        if origin:
-            parsed = urlparse(origin)
-            if parsed.netloc != request.host:
-                return _json_err("Cross-origin requests are not allowed", 403)
+        # Require same-origin Origin or Referer on mutating requests (CSRF).
+        peer = _request_origin_host()
+        if not peer or peer != request.host:
+            return _json_err("Cross-origin requests are not allowed", 403)
     # Per-request latency tracing to distinguish AP/network delays from handler time.
     request._blockvase_start = time.perf_counter()  # type: ignore[attr-defined]
 
@@ -375,10 +406,26 @@ def _start_update_check_thread() -> None:
     _update_check_thread.start()
 
 
+def _constant_time_equal(a: str, b: str) -> bool:
+    """Length-safe compare_digest wrapper (mismatched lengths → False, not ValueError)."""
+    if not a or not b:
+        return False
+    if len(a) != len(b):
+        # Compare against self-length digest material so timing stays flat-ish.
+        secrets.compare_digest(a, a)
+        return False
+    return secrets.compare_digest(a, b)
+
+
 def _is_token_valid(cfg: dict[str, Any], token: str | None) -> bool:
-    expected = str(cfg.get("setup_token", "") or "")
     supplied = str(token or "")
-    return bool(expected and supplied and secrets.compare_digest(supplied, expected))
+    if not supplied:
+        return False
+    for key in ("session_token", "setup_token"):
+        expected = str(cfg.get(key, "") or "")
+        if expected and _constant_time_equal(supplied, expected):
+            return True
+    return False
 
 
 def _has_admin_credentials(cfg: dict[str, Any]) -> bool:
@@ -390,7 +437,7 @@ def _is_admin_password_valid(cfg: dict[str, Any], username: str, password: str) 
     password_hash = str(cfg.get("admin_password_hash", "") or "")
     if not expected_username or not password_hash or not username or not password:
         return False
-    if not secrets.compare_digest(username, expected_username):
+    if not _constant_time_equal(username, expected_username):
         return False
     try:
         return check_password_hash(password_hash, password)
@@ -410,6 +457,12 @@ def _validate_admin_credentials(username: str, password: str) -> str:
     return ""
 
 
+def _issue_session_token(cfg: dict[str, Any]) -> str:
+    token = secrets.token_urlsafe(32)
+    cfg["session_token"] = token
+    return token
+
+
 def _save_admin_credentials(cfg: dict[str, Any], username: str, password: str) -> str:
     username = username.strip()
     err = _validate_admin_credentials(username, password)
@@ -417,20 +470,31 @@ def _save_admin_credentials(cfg: dict[str, Any], username: str, password: str) -
         return err
     cfg["admin_username"] = username
     cfg["admin_password_hash"] = generate_password_hash(password)
+    _issue_session_token(cfg)
     return ""
 
 
 def _set_admin_cookie(response, cfg: dict[str, Any]):
-    token = str(cfg.get("setup_token", "") or "")
+    # Prefer session_token after password login; setup_token remains for QR first-boot.
+    token = str(cfg.get("session_token", "") or "") or str(cfg.get("setup_token", "") or "")
     if token:
         response.set_cookie(
             ADMIN_COOKIE_NAME,
             token,
             max_age=ADMIN_COOKIE_MAX_AGE,
             httponly=True,
-            samesite="Lax",
+            samesite="Strict",
         )
     return response
+
+
+def _ap_password(cfg: dict[str, Any]) -> str:
+    pw = str(cfg.get("ap_password", "") or "").strip()
+    if not pw or pw == "blockvase1234":
+        pw = generate_ap_password()
+        cfg["ap_password"] = pw
+        save_config(cfg)
+    return pw
 
 
 def _detect_ip() -> str:
@@ -549,6 +613,8 @@ def admin_auth_login():
     password = str(body.get("password", ""))
     if not _is_admin_password_valid(cfg, username, password):
         return _json_err("Invalid username or password", 403)
+    _issue_session_token(cfg)
+    save_config(cfg)
     response = _json_ok(message="Authenticated")
     return _set_admin_cookie(response, cfg)
 
@@ -702,7 +768,7 @@ def set_mining_payout():
             applied=False,
         )
 
-    script = BASE_DIR / "scripts" / "set-mining-payout.sh"
+    script = _privileged_script("set-mining-payout.sh")
     if not script.exists():
         return _json_err("Mining payout helper is not installed.", 500)
 
@@ -795,18 +861,25 @@ def save_all():
         if home_wifi:
             cfg["setup_complete"] = True
             cfg["wifi_recovery"] = False
+            # After leaving first-boot with admin creds, rotate QR setup_token so old
+            # setup URLs stop granting admin; session_token remains for this browser.
+            if _has_admin_credentials(cfg):
+                cfg["setup_token"] = secrets.token_urlsafe(16)
+                if not cfg.get("session_token"):
+                    _issue_session_token(cfg)
 
         save_config(cfg)
         _sync_hostname(cfg["device_name"])
 
         reboot_scheduled = False
+        wifi_switch_started = False
         if cfg.get("setup_complete"):
             # Switch Wi-Fi first, then reboot. A fixed 8s reboot was racing the
             # NetworkManager handoff and left clones with setup_complete=true,
             # no AP, and no working client profile.
             def _switch_then_reboot() -> None:
                 time.sleep(2)  # let client receive HTTP response before AP goes down
-                ap_script = BASE_DIR / "scripts" / "ap-mode.sh"
+                ap_script = _privileged_script("ap-mode.sh")
                 ok = False
                 if ap_script.exists():
                     try:
@@ -862,14 +935,24 @@ def save_all():
                     _log.exception("scheduled reboot after wifi switch failed: %s", ex)
 
             threading.Thread(target=_switch_then_reboot, daemon=True).start()
-            reboot_scheduled = os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() == "true"
+            wifi_switch_started = True
+            # Do not claim reboot is scheduled — soft recovery may skip it.
+            reboot_scheduled = False
         else:
             reboot_scheduled = _schedule_reboot_after_save(8.0)
-        return _json_ok(
-            message="Settings saved. Switching to Wi-Fi..." if cfg.get("setup_complete") else "Settings saved.",
+        response = _json_ok(
+            message=(
+                "Settings saved. Switching to Wi-Fi; device reboots if join succeeds..."
+                if wifi_switch_started
+                else "Settings saved."
+            ),
             deviceName=cfg["device_name"],
             rebootScheduled=reboot_scheduled,
+            wifiSwitchStarted=wifi_switch_started,
         )
+        if _is_token_valid(cfg, _request_admin_token()):
+            return _set_admin_cookie(response, cfg)
+        return response
     except PermissionError:
         _log.exception("save-all: cannot write %s", CONFIG_PATH)
         return _json_err(
@@ -1078,12 +1161,14 @@ def factory_reset():
     preserved_rpc = json.loads(json.dumps(cfg_before.get("rpc", {})))
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))
     cfg["setup_token"] = ""
+    cfg["session_token"] = ""
+    cfg["ap_password"] = ""
     cfg["mining_payout_address"] = ""
     cfg["rpc"] = json.loads(json.dumps(DEFAULT_CONFIG["rpc"]))
     cfg["rpc"].update(preserved_rpc)
     _apply_local_rpc(cfg)
     save_config(cfg)
-    ap_script = BASE_DIR / "scripts" / "ap-mode.sh"
+    ap_script = _privileged_script("ap-mode.sh")
     if ap_script.exists():
         try:
             subprocess.run(
@@ -1193,13 +1278,6 @@ def ap_mode():
     )
 
 
-@app.get("/api/validate-qr-token")
-def validate_qr():
-    cfg = load_config()
-    token = request.args.get("token", "")
-    return jsonify({"valid": _is_token_valid(cfg, token)})
-
-
 @app.get("/api/setup-status")
 def setup_status():
     cfg = load_config()
@@ -1228,15 +1306,28 @@ def ap_info():
     cfg = load_config()
     show_setup = _needs_setup_ui(cfg)
     ap_ssid = ap_broadcast_ssid(cfg)
-    ap_password = "blockvase1234"
+    # Only expose AP PSK / setup URL while the setup AP UI is active.
+    if not show_setup:
+        return jsonify(
+            {
+                "ap_mode": False,
+                "wifi_recovery": False,
+                "ssid": "",
+                "password": "",
+                "settings_url": "",
+                "wifi_qr_payload": "",
+                "ap_clients": 0,
+            }
+        )
+    ap_password = _ap_password(cfg)
     wifi_qr_payload = f"WIFI:T:WPA;S:{ap_ssid};P:{ap_password};;"
     return jsonify(
         {
-            "ap_mode": show_setup,
+            "ap_mode": True,
             "wifi_recovery": _is_wifi_recovery(cfg),
             "ssid": ap_ssid,
             "password": ap_password,
-            "settings_url": _setup_url(cfg) if show_setup else "",
+            "settings_url": _setup_url(cfg),
             "wifi_qr_payload": wifi_qr_payload,
             "ap_clients": _ap_client_count(),
         }
@@ -1252,7 +1343,7 @@ def setup_qr():
     kind = request.args.get("kind", "settings")
     if kind == "connect":
         ap_ssid = ap_broadcast_ssid(cfg)
-        ap_password = "blockvase1234"
+        ap_password = _ap_password(cfg)
         payload = f"WIFI:T:WPA;S:{ap_ssid};P:{ap_password};;"
     else:
         payload = _setup_url(cfg)

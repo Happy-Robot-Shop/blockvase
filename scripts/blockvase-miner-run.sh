@@ -35,8 +35,15 @@ if [[ -z "${USER}" ]]; then
 fi
 
 BACKOFF="${BLOCKVASE_MINER_RESTART_SEC:-45}"
+THERMAL_TRIP="${BLOCKVASE_THERMAL_TRIP_PATH:-/var/lib/blockvase/thermal-trip.json}"
 
 while true; do
+  sleep_for="${BACKOFF}"
+  if [[ -f "${THERMAL_TRIP}" ]]; then
+    # After a hard thermal trip, wait longer before re-ramping clocks.
+    sleep_for="${BLOCKVASE_THERMAL_RESTART_SEC:-180}"
+    echo "blockvase-miner: thermal trip file present; using ${sleep_for}s backoff" >&2
+  fi
   set +e
   if [[ -n "${USER}" ]]; then
     "${PY}" pyminer.py -c "${CONFIG}" -o "${URL}" -u "${USER}" -p "${PASS}"
@@ -45,6 +52,6 @@ while true; do
   fi
   rc=$?
   set -e
-  echo "blockvase-miner: pyminer exited rc=${rc}; sleeping ${BACKOFF}s" >&2
-  sleep "${BACKOFF}"
+  echo "blockvase-miner: pyminer exited rc=${rc}; sleeping ${sleep_for}s" >&2
+  sleep "${sleep_for}"
 done

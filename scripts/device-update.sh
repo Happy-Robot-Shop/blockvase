@@ -3,7 +3,16 @@
 # Intended via: sudo scripts/device-update.sh (portal Update device action).
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${_SCRIPT_DIR}/../app/server.py" ]]; then
+  PROJECT_DIR="$(cd "${_SCRIPT_DIR}/.." && pwd)"
+elif [[ -n "${BLOCKVASE_PROJECT_DIR:-}" && -f "${BLOCKVASE_PROJECT_DIR}/app/server.py" ]]; then
+  PROJECT_DIR="${BLOCKVASE_PROJECT_DIR}"
+elif [[ -f /etc/blockvase/project-dir ]]; then
+  PROJECT_DIR="$(tr -d '[:space:]' </etc/blockvase/project-dir)"
+else
+  PROJECT_DIR="/home/blockvase/blockvase"
+fi
 STATE_DIR="/var/lib/blockvase"
 STATE_FILE="${STATE_DIR}/update-status.json"
 LOG_FILE="${STATE_DIR}/device-update.log"
@@ -99,6 +108,11 @@ systemctl daemon-reload || true
 systemctl restart blockvase-ap.service || true
 systemctl restart blockvase.service || true
 systemctl restart blockvase-kiosk.service || true
+# Mining stack: always bounce miner so new code/venv is live; DATUM only if payout configured.
+systemctl restart blockvase-miner.service || true
+if [[ -s /etc/blockvase/solo_mining_address ]]; then
+  systemctl restart datum-gateway.service || true
+fi
 
 write_state "success" "Update complete." "${STARTED_AT}" "$(iso_now)"
 echo "Device update finished successfully."

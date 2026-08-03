@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# One-shot live apply for the security hardening changes (requires root).
+# Usage: sudo scripts/apply-security-hardening-live.sh
+set -euo pipefail
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "Run as root: sudo $0" >&2
+  exit 1
+fi
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SERVICE_USER="blockvase"
+
+mkdir -p /usr/lib/blockvase /etc/blockvase /var/lib/blockvase
+echo "${PROJECT_DIR}" >/etc/blockvase/project-dir
+chmod 644 /etc/blockvase/project-dir
+
+for s in ap-mode.sh device-update.sh set-mining-payout.sh blockvase-miner-refresh-env.sh; do
+  install -o root -g root -m 755 "${PROJECT_DIR}/scripts/${s}" "/usr/lib/blockvase/${s}"
+done
+
+cat >/etc/sudoers.d/blockvase-ap <<EOF
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/ap-mode.sh
+EOF
+cat >/etc/sudoers.d/blockvase-mining-payout <<EOF
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/set-mining-payout.sh
+EOF
+cat >/etc/sudoers.d/blockvase-miner-env <<EOF
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/blockvase-miner-refresh-env.sh
+EOF
+cat >/etc/sudoers.d/blockvase-device-update <<EOF
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/lib/blockvase/device-update.sh
+EOF
+cat >/etc/sudoers.d/blockvase-check-asic <<EOF
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop blockvase-miner.service, /usr/bin/systemctl start blockvase-miner.service, /usr/bin/systemctl restart blockvase-miner.service
+EOF
+chmod 440 /etc/sudoers.d/blockvase-ap /etc/sudoers.d/blockvase-mining-payout \
+  /etc/sudoers.d/blockvase-miner-env /etc/sudoers.d/blockvase-device-update \
+  /etc/sudoers.d/blockvase-check-asic
+
+install -o root -g root -m 644 "${PROJECT_DIR}/systemd/bitcoind.service" /etc/systemd/system/bitcoind.service
+
+TMP_UNIT="$(mktemp)"
+sed "s|__PROJECT_DIR__|${PROJECT_DIR}|g; s|__SERVICE_USER__|${SERVICE_USER}|g" \
+  "${PROJECT_DIR}/systemd/blockvase.service" >"${TMP_UNIT}"
+install -o root -g root -m 644 "${TMP_UNIT}" /etc/systemd/system/blockvase.service
+rm -f "${TMP_UNIT}"
+
+# Drop setcap on system Python; portal binds :80 via AmbientCapabilities.
+for p in /usr/bin/python3 /usr/bin/python3.13 /usr/bin/python3.12; do
+  [[ -f "${p}" ]] && setcap -r "${p}" 2>/dev/null || true
+done
+if [[ -x "${PROJECT_DIR}/.venv/bin/python3" ]]; then
+  REAL="$(readlink -f "${PROJECT_DIR}/.venv/bin/python3" 2>/dev/null || true)"
+  [[ -n "${REAL}" ]] && setcap -r "${REAL}" 2>/dev/null || true
+fi
+
+if getent group bitcoin >/dev/null 2>&1; then
+  usermod -aG bitcoin "${SERVICE_USER}" 2>/dev/null || true
+fi
+
+mkdir -p "${PROJECT_DIR}/data"
+chown "${SERVICE_USER}:${SERVICE_USER}" "${PROJECT_DIR}/data"
+chmod 755 "${PROJECT_DIR}/data"
+[[ -f "${PROJECT_DIR}/data/config.json" ]] && chown "${SERVICE_USER}:${SERVICE_USER}" "${PROJECT_DIR}/data/config.json"
+[[ -f "${PROJECT_DIR}/data/config.json" ]] && chmod 600 "${PROJECT_DIR}/data/config.json"
+
+# Recover Wi-Fi PSK from legacy root-owned wifi.secret into sealed config field.
+if [[ -f "${PROJECT_DIR}/data/wifi.secret" ]]; then
+  WIFI_PW="$(tr -d '\r\n' <"${PROJECT_DIR}/data/wifi.secret" || true)"
+  sudo -u "${SERVICE_USER}" env PROJECT_DIR="${PROJECT_DIR}" WIFI_PW="${WIFI_PW}" python3 - <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["PROJECT_DIR"])
+from app.config import load_config, save_config
+cfg = load_config()
+pw = os.environ.get("WIFI_PW", "")
+if pw:
+    cfg["wifi_password"] = pw
+save_config(cfg)
+print("wifi password sealed into config.json")
+PY
+  rm -f "${PROJECT_DIR}/data/wifi.secret"
+fi
+
+# Ensure ap_password / session fields exist.
+sudo -u "${SERVICE_USER}" env PROJECT_DIR="${PROJECT_DIR}" python3 - <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["PROJECT_DIR"])
+from app.config import load_config, save_config
+cfg = load_config()
+save_config(cfg)
+print("config normalized")
+PY
+
+visudo -c
+systemctl daemon-reload
+systemctl restart blockvase.service
+systemctl restart blockvase-ap.service || true
+# Miner picks up rest.py debug=False + thermal trip helper on next restart.
+systemctl restart blockvase-miner.service || true
+
+echo "Live security hardening applied."
+echo "  - /usr/lib/blockvase scripts + sudoers"
+echo "  - root-owned bitcoind.service + AmbientCapabilities portal unit"
+echo "  - setcap removed from system Python (if present)"
+echo "  - wifi.secret migrated into wifi_password_enc"

@@ -3,7 +3,16 @@
 # Does not touch DATUM JSON (use set-mining-payout.sh for full payout application).
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${_SCRIPT_DIR}/../app/server.py" ]]; then
+  PROJECT_DIR="$(cd "${_SCRIPT_DIR}/.." && pwd)"
+elif [[ -n "${BLOCKVASE_PROJECT_DIR:-}" && -f "${BLOCKVASE_PROJECT_DIR}/app/server.py" ]]; then
+  PROJECT_DIR="${BLOCKVASE_PROJECT_DIR}"
+elif [[ -f /etc/blockvase/project-dir ]]; then
+  PROJECT_DIR="$(tr -d '[:space:]' </etc/blockvase/project-dir)"
+else
+  PROJECT_DIR="/home/blockvase/blockvase"
+fi
 ADDRESS_FILE="/etc/blockvase/solo_mining_address"
 MINER_ENV="/etc/blockvase/miner.env"
 SERVICE_USER="${BLOCKVASE_SERVICE_USER:-${SUDO_USER:-blockvase}}"

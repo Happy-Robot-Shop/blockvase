@@ -73,9 +73,9 @@ function loadDeviceName() {
 async function validateQrToken() {
   if (!setupToken) return false;
   try {
-    const r = await fetch(withToken("/api/validate-qr-token"));
+    const r = await fetch(withToken("/api/admin-auth/status"));
     const d = await r.json();
-    return !!d.valid;
+    return !!d.authenticated;
   } catch {
     return false;
   }
@@ -492,6 +492,22 @@ function saveAll(e) {
     .then(d => {
       if (d.success) {
         const finalDeviceName = (d.deviceName && d.deviceName.trim()) ? d.deviceName.trim() : deviceName;
+        if (d.wifiSwitchStarted) {
+          showStatus(
+            statusDiv,
+            "success",
+            "Settings saved. Switching to Wi-Fi; the device reboots if join succeeds..."
+          );
+          showLoading(
+            "Switching to your Wi-Fi. If join succeeds the device reboots, then open http://" +
+              finalDeviceName +
+              ".local (redirect in 45s)..."
+          );
+          setTimeout(() => {
+            window.location.href = "http://" + finalDeviceName + ".local";
+          }, 45000);
+          return;
+        }
         if (d.rebootScheduled === false) {
           hideLoading();
           showStatus(

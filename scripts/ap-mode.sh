@@ -21,7 +21,17 @@
 
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve project dir whether this script runs from the git tree or /usr/lib/blockvase.
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${_SCRIPT_DIR}/../app/server.py" ]]; then
+  PROJECT_DIR="$(cd "${_SCRIPT_DIR}/.." && pwd)"
+elif [[ -n "${BLOCKVASE_PROJECT_DIR:-}" && -f "${BLOCKVASE_PROJECT_DIR}/app/server.py" ]]; then
+  PROJECT_DIR="${BLOCKVASE_PROJECT_DIR}"
+elif [[ -f /etc/blockvase/project-dir ]]; then
+  PROJECT_DIR="$(tr -d '[:space:]' </etc/blockvase/project-dir)"
+else
+  PROJECT_DIR="/home/blockvase/blockvase"
+fi
 CONFIG_JSON="${PROJECT_DIR}/data/config.json"
 AP_GATEWAY="192.168.4.1"
 AP_CIDR="${AP_GATEWAY}/24"
@@ -82,7 +92,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.environ["PROJECT_DIR"])
-from app.config import ap_broadcast_ssid, load_config
+from app.config import ap_broadcast_ssid, generate_ap_password, load_config, save_config
 
 path = Path(os.environ["CONFIG_JSON"])
 if not path.exists():
@@ -91,7 +101,7 @@ if not path.exists():
     ap_ssid = f"blockvase-{hardware_ap_suffix()}"
     print("false")
     print(ap_ssid)
-    print("blockvase1234")
+    print(generate_ap_password())
     print("blockvase")
     print("")
     print("")
@@ -102,7 +112,11 @@ cfg = load_config()
 setup_complete = bool(cfg.get("setup_complete", False))
 wifi_recovery = bool(cfg.get("wifi_recovery", False))
 ap_ssid = ap_broadcast_ssid(cfg)
-ap_password = "blockvase1234"
+ap_password = str(cfg.get("ap_password", "") or "").strip()
+if not ap_password or ap_password == "blockvase1234":
+    ap_password = generate_ap_password()
+    cfg["ap_password"] = ap_password
+    save_config(cfg)
 ssid = str(cfg.get("wifi_ssid", ""))
 password = str(cfg.get("wifi_password", ""))
 name = str(cfg.get("device_name", "blockvase"))
@@ -145,8 +159,13 @@ if wr in ("true", "false"):
     cfg["wifi_recovery"] = wr == "true"
 if os.environ.get("CLEAR_PASSWORD") == "1":
     cfg["wifi_password"] = ""
+    cfg["wifi_password_enc"] = ""
 if not str(cfg.get("setup_token") or "").strip():
     cfg["setup_token"] = secrets.token_urlsafe(16)
+# Never persist plaintext Wi-Fi or RPC passwords in config.json.
+cfg.pop("wifi_password", None)
+if isinstance(cfg.get("rpc"), dict):
+    cfg["rpc"]["password"] = ""
 
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
