@@ -96,6 +96,11 @@ class BM1366Miner:
         self.found_timestamps = list()
 
         self.shares = list()
+        # Cumulative share work for lifetime / EMA hashrate (avoids noisy fixed 600s window).
+        self._hash_work_total = 0
+        self._hash_last_ts = None
+        self._hash_rate_ema = 0.0
+        self._hash_ema_tau_sec = 1200.0  # ~20 min time-constant
         self.stats = influx.Stats()
 
         self.display = SSD1306(self.stats)
@@ -391,6 +396,7 @@ class BM1366Miner:
             with self.stats.lock:
                 self.stats.total_uptime += 1
                 self.stats.uptime += 1
+                self._refresh_hash_rate_lifetime_locked()
             time.sleep(1)
 
         logging.info("uptime counter thread ended ...")
@@ -543,33 +549,74 @@ class BM1366Miner:
             self.found_timestamps.pop(0)
 
 
+    def _lifetime_hash_rate_gh_locked(self):
+        """Lifetime GH/s from cumulative share work / uptime. Caller holds stats.lock."""
+        if self._hash_work_total <= 0:
+            return 0.0
+        uptime = max(int(self.stats.uptime), 1)
+        return (self._hash_work_total / uptime) / 1e9
+
+    def _refresh_hash_rate_lifetime_locked(self):
+        """Keep lifetime (and display) current as uptime advances between shares."""
+        lifetime_gh = self._lifetime_hash_rate_gh_locked()
+        self.stats.hashing_speed_lifetime = lifetime_gh
+        if self._hash_rate_ema <= 0 and lifetime_gh > 0:
+            self._hash_rate_ema = lifetime_gh
+        elif self._hash_rate_ema > 0 and lifetime_gh > 0:
+            # Gentle pull toward lifetime when shares are sparse
+            self._hash_rate_ema = 0.997 * self._hash_rate_ema + 0.003 * lifetime_gh
+        self.stats.hashing_speed_ema = self._hash_rate_ema
+        self.stats.hashing_speed = (
+            self._hash_rate_ema if self._hash_rate_ema > 0 else lifetime_gh
+        )
+
+    def _update_hash_rates(self, difficulty):
+        """
+        Update lifetime + EMA hashrate after a valid share.
+
+        Lifetime: total share-work / uptime (stable truth).
+        EMA: time-constant smoothed inter-share rate (~20 min), clamped vs lifetime
+        so high pool difficulty doesn't produce 2x phantom spikes.
+        Primary stats.hashing_speed follows the EMA (lifetime until EMA seeds).
+        """
+        now = time.time()
+        work = int(difficulty) << 32
+        with self.stats.lock:
+            self._hash_work_total += work
+            lifetime_gh = self._lifetime_hash_rate_gh_locked()
+            self.stats.hashing_speed_lifetime = lifetime_gh
+
+            if self._hash_last_ts is None or self._hash_rate_ema <= 0:
+                self._hash_rate_ema = lifetime_gh
+            else:
+                dt = max(now - self._hash_last_ts, 1e-3)
+                instant_gh = (work / dt) / 1e9
+                # Cap absurd bursts (two shares milliseconds apart)
+                cap = max(lifetime_gh * 3.0, 750.0)
+                instant_gh = min(instant_gh, cap)
+                alpha = 1.0 - math.exp(-dt / self._hash_ema_tau_sec)
+                alpha = min(max(alpha, 0.02), 0.35)
+                self._hash_rate_ema = (
+                    alpha * instant_gh + (1.0 - alpha) * self._hash_rate_ema
+                )
+
+            self._hash_last_ts = now
+            self.stats.hashing_speed_ema = self._hash_rate_ema
+            self.stats.hashing_speed = (
+                self._hash_rate_ema if self._hash_rate_ema > 0 else lifetime_gh
+            )
+            logging.debug(
+                "\033[32mhash rate: ema=%.1f lifetime=%.1f GH/s\033[0m",
+                self.stats.hashing_speed_ema,
+                self.stats.hashing_speed_lifetime,
+            )
+            return self.stats.hashing_speed
+
     def hash_rate(self, time_period=600):
-        current_time = time.time()
-        total_work = 0
-
-        #min_timestamp = current_time
-        #max_timestamp = 0
-        for shares, difficulty, timestamp in self.shares:
-            # Consider shares only in the last 10 minutes
-            if current_time - timestamp <= time_period:
-                total_work += shares * (difficulty << 32)
-                #min_timestamp = min(min_timestamp, timestamp)
-                #max_timestamp = max(max_timestamp, timestamp)
-
-        #if min_timestamp > max_timestamp:
-        #    raise Exception("timestamp range calculation failed")
-
-        #if min_timestamp == max_timestamp:
-        #    return 0.0
-
-        # Hash rate in H/s (Hashes per second)
-        #hash_rate_hps = total_work / (max_timestamp - min_timestamp)
-        hash_rate_hps = total_work / time_period
-
-        # Convert hash rate to GH/s
-        hash_rate_ghps = hash_rate_hps / 1e9
-        logging.debug("\033[32mhash rate: %f GH/s\033[0m", hash_rate_ghps)
-        return hash_rate_ghps
+        """Backward-compatible helper; returns EMA/lifetime GH/s (time_period unused)."""
+        with self.stats.lock:
+            self._refresh_hash_rate_lifetime_locked()
+            return self.stats.hashing_speed
 
     def _set_target(self, target):
         self._target = '%064x' % target
@@ -720,10 +767,12 @@ class BM1366Miner:
                         if is_valid and not duplicate:
                             self.shares.append((1, difficulty, time.time()))
 
-                        self.stats.hashing_speed = self.hash_rate()
                         hash_difficulty = shared.calculate_difficulty_from_hash(hash)
                         self.stats.best_difficulty = max(self.stats.best_difficulty, hash_difficulty)
                         self.stats.total_best_difficulty = max(self.stats.total_best_difficulty, hash_difficulty)
+
+                    if is_valid and not duplicate:
+                        self._update_hash_rates(difficulty)
 
                     # restart miner with new extranonce2
                     #self.new_job_event.set() TODO
@@ -827,10 +876,12 @@ class BM1366Miner:
                     if is_valid and not duplicate:
                         self.shares.append((1, difficulty, time.time()))
 
-                    self.stats.hashing_speed = self.hash_rate()
                     hash_difficulty = shared.calculate_difficulty_from_hash(hash_hex)
                     self.stats.best_difficulty = max(self.stats.best_difficulty, hash_difficulty)
                     self.stats.total_best_difficulty = max(self.stats.total_best_difficulty, hash_difficulty)
+
+                if is_valid and not duplicate:
+                    self._update_hash_rates(difficulty)
 
                 if not is_valid or duplicate:
                     self.not_accepted_callback()

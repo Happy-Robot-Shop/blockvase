@@ -86,6 +86,8 @@ class RestAPI:
                 "vdomain3": self.stats.vdomain3,
                 "vdomain4": self.stats.vdomain4,
                 "hashing_speed": self.stats.hashing_speed,
+                "hashing_speed_lifetime": self.stats.hashing_speed_lifetime,
+                "hashing_speed_ema": self.stats.hashing_speed_ema,
                 "invalid_shares": self.stats.invalid_shares,
                 "valid_shares": self.stats.valid_shares,
                 "uptime": self.stats.uptime,

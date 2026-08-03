@@ -19,6 +19,9 @@ class Stats:
         self.vdomain3 = 1200
         self.vdomain4 = 1200
         self.hashing_speed = 0.0
+        # Lifetime average and time-smoothed EMA (GH/s); hashing_speed tracks EMA for display.
+        self.hashing_speed_lifetime = 0.0
+        self.hashing_speed_ema = 0.0
         self.invalid_shares = 0
         self.valid_shares = 0
         self.difficulty = 512
