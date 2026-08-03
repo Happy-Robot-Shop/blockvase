@@ -34,10 +34,19 @@ class BitcoinRpcClient:
             self._thread_local.session = session
         return session
 
-    def call(self, rpc_cfg: dict[str, Any], method: str, params: list[Any] | None = None) -> Any:
+    def call(
+        self,
+        rpc_cfg: dict[str, Any],
+        method: str,
+        params: list[Any] | None = None,
+        *,
+        wallet: str | None = None,
+    ) -> Any:
         params = params or []
         scheme = "https" if rpc_cfg.get("use_https") else "http"
         url = f"{scheme}://{rpc_cfg['host']}:{rpc_cfg['port']}"
+        if wallet:
+            url = f"{url}/wallet/{wallet}"
 
         payload = {"jsonrpc": "1.0", "id": "blockvase", "method": method, "params": params}
         timeout = int(rpc_cfg.get("timeout_seconds", 8))

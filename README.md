@@ -168,6 +168,7 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 - **Software:** Vendored under `piaxe-miner/` (not cloned at bootstrap). Launched by `scripts/blockvase-miner-run.sh` / `systemd/blockvase-miner.service`.
 - Default config: `piaxe-miner/config.blockvase.yml`.
 - Connects to **local DATUM only** (`stratum+tcp://127.0.0.1:23334`) when a payout address is set. It never connects to an external Stratum pool URL.
+- **Payout address:** by default generated from a local Knots wallet (`blockvase`) after setup (wallet RPC works during IBD). DATUM/hashing stays deferred until the node leaves IBD/catch-up; Settings can replace the address or generate a new one anytime.
 - **Bootstrap patches:** `scripts/install-mining-stack.sh` runs `scripts/apply-piaxe-miner-patches.sh`, which applies idempotent diffs from `scripts/patches/piaxe-miner/` before creating the Python venv. That path matters if you replace `piaxe-miner/` with a fresh upstream tree; a normal Blockvase checkout already includes the same changes inline.
 
 **Blockvase modifications**
@@ -178,7 +179,7 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
 - **Thermal / reliability:** PLL-safe frequency ramp, init cooldown, PGOOD abort on overheating, full-speed fan drive (`piaxe/miner.py`, `piaxe/bm1366.py`, `piaxe/boards/piaxe.py`, config).
 - **Graceful hardware failure:** board/GPIO/I2C init failures no longer kill the process; REST stays up when possible (`piaxe/miner.py`).
 - **Graceful ASIC failure:** chip enumeration failure keeps LM75/REST monitoring without hashing (extended soft-fail path).
-- **Monitoring without payout:** miner service can run with an empty Stratum user; no hashing until Settings saves a payout (`pyminer.py`, `blockvase-miner-run.sh`).
+- **Monitoring without payout:** miner service can run with an empty Stratum user; no hashing until a payout exists (auto from node wallet after setup, or Settings) (`pyminer.py`, `blockvase-miner-run.sh`, `app/mining_wallet.py`).
 - **Blockvase config:** production YAML with REST on localhost for portal mining metrics.
 - **Lifecycle:** systemd + env file (`/etc/blockvase/miner.env`) instead of ad-hoc shell start.
 - **Service coupling:** miner unit does not hard-require DATUM, so monitoring works when DATUM is off.

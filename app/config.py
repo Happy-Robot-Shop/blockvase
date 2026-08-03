@@ -42,6 +42,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "totp_secret_enc": "",
     "totp_pending_secret_enc": "",
     "mining_payout_address": "",
+    # "node" = generated from local Knots wallet; "custom" = user-entered external address.
+    "mining_payout_source": "",
     "rpc": {
         "host": "127.0.0.1",
         "port": 8332,

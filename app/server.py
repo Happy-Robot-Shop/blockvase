@@ -33,6 +33,12 @@ from .config import (
     unseal_secret,
 )
 from .mining_metrics import fetch_mining_metrics
+from .mining_wallet import (
+    address_is_mine,
+    new_mining_payout_address,
+    node_sync_status,
+    validate_bitcoin_address,
+)
 from .state import StateManager
 from .totp import generate_secret, otpauth_uri, verify_totp
 
@@ -602,6 +608,204 @@ def _current_mining_payout_address(cfg: dict[str, Any]) -> str:
     return str(cfg.get("mining_payout_address", "") or "")
 
 
+def _mining_payout_source(cfg: dict[str, Any], address: str) -> str:
+    explicit = str(cfg.get("mining_payout_source", "") or "").strip().lower()
+    if explicit in {"node", "custom"}:
+        return explicit
+    if not address:
+        return ""
+    try:
+        if address_is_mine(state.rpc, cfg.get("rpc") or {}, address):
+            return "node"
+    except Exception:
+        pass
+    return "custom"
+
+
+def _apply_mining_payout_address(
+    cfg: dict[str, Any], address: str, *, source: str, message: str | None = None
+) -> Any:
+    """Persist payout via set-mining-payout.sh. Returns a Flask JSON response."""
+    address = address.strip()
+    if not address:
+        return _json_err("Mining payout address is required.")
+    if address.startswith("-"):
+        return _json_err("Mining payout address is invalid.")
+
+    rpc_cfg = cfg.get("rpc") or {}
+    if not validate_bitcoin_address(state.rpc, rpc_cfg, address):
+        return _json_err("That does not look like a valid Bitcoin address.")
+
+    source = "node" if source == "node" else "custom"
+
+    if os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() != "true":
+        cfg["mining_payout_address"] = address
+        cfg["mining_payout_source"] = source
+        save_config(cfg)
+        return _json_ok(
+            address=address,
+            source=source,
+            message=message
+            or "Address saved, but mining services were not updated because system actions are disabled.",
+            applied=False,
+        )
+
+    script = _privileged_script("set-mining-payout.sh")
+    if not script.exists():
+        return _json_err("Mining payout helper is not installed.", 500)
+
+    try:
+        result = subprocess.run(
+            ["sudo", str(script), address],
+            timeout=60,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as ex:
+        _log.exception("set-mining-payout failed")
+        return _json_err(f"Could not update mining payout address: {ex}", 500)
+
+    if result.returncode != 0:
+        msg = (result.stderr or result.stdout or "Mining payout helper failed.").strip()
+        return _json_err(msg[-500:], 400)
+
+    cfg["mining_payout_address"] = address
+    cfg["mining_payout_source"] = source
+    save_config(cfg)
+    return _json_ok(
+        address=address,
+        source=source,
+        message=message or "Mining payout address saved.",
+        applied=True,
+    )
+
+
+def _ensure_node_mining_payout(cfg: dict[str, Any] | None = None) -> str | None:
+    """If no payout is configured, generate one from the local Knots wallet and apply it.
+
+    Wallet address creation is IBD-safe. set-mining-payout.sh defers DATUM until the
+    node is synced enough for block templates.
+    """
+    cfg = cfg or load_config()
+    existing = _current_mining_payout_address(cfg).strip()
+    if existing:
+        return existing
+    try:
+        address = new_mining_payout_address(state.rpc, cfg.get("rpc") or {})
+    except Exception as ex:
+        _log.warning("could not generate mining payout from node wallet: %s", ex)
+        return None
+    resp = _apply_mining_payout_address(
+        cfg,
+        address,
+        source="node",
+        message=None,  # filled below with IBD-aware text when possible
+    )
+    # Error responses are (Response, status) tuples from _json_err.
+    if isinstance(resp, tuple):
+        _log.warning("failed to apply node mining payout for %s", address)
+        return None
+    return address
+
+
+def _mining_status_fields(cfg: dict[str, Any], address: str) -> dict[str, Any]:
+    sync = node_sync_status(state.rpc, cfg.get("rpc") or {})
+    source = _mining_payout_source(cfg, address)
+    ready = bool(address) and bool(sync.get("ready"))
+    return {
+        "address": address,
+        "source": source,
+        "from_node": source == "node",
+        "initialblockdownload": bool(sync.get("initialblockdownload")),
+        "mining_ready": ready,
+        "blocks": int(sync.get("blocks") or 0),
+        "headers": int(sync.get("headers") or 0),
+        "verificationprogress": float(sync.get("verificationprogress") or 0),
+    }
+
+
+def _datum_gateway_active() -> bool:
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "--quiet", "datum-gateway.service"],
+            timeout=10,
+            check=False,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _ensure_datum_when_synced() -> None:
+    """Start DATUM once IBD finishes if a payout address is already configured."""
+    if os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() != "true":
+        return
+    cfg = load_config()
+    address = _current_mining_payout_address(cfg).strip()
+    if not address or address.startswith("--"):
+        return
+    sync = node_sync_status(state.rpc, cfg.get("rpc") or {})
+    if not sync.get("ready"):
+        return
+    if _datum_gateway_active():
+        return
+    script = _privileged_script("set-mining-payout.sh")
+    if not script.is_file():
+        return
+    # New helper supports --ensure-services; older installs treat unknown args as the
+    # address string — never pass the flag unless the script advertises it.
+    try:
+        supports_ensure = "--ensure-services" in script.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        supports_ensure = False
+    cmd = ["sudo", str(script), "--ensure-services"] if supports_ensure else ["sudo", str(script), address]
+    try:
+        subprocess.run(
+            cmd,
+            timeout=90,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as ex:
+        _log.warning("ensure mining services after sync failed: %s", ex)
+
+
+_mining_sync_thread: threading.Thread | None = None
+
+
+def _start_mining_sync_thread() -> None:
+    global _mining_sync_thread
+    if _mining_sync_thread and _mining_sync_thread.is_alive():
+        return
+
+    def _loop() -> None:
+        # First pass after startup; then every minute.
+        while True:
+            try:
+                cfg = load_config()
+                if (
+                    _is_setup_complete(cfg)
+                    and not _is_wifi_recovery(cfg)
+                    and not _current_mining_payout_address(cfg).strip()
+                ):
+                    _ensure_node_mining_payout(cfg)
+                _ensure_datum_when_synced()
+            except Exception as ex:
+                _log.warning("mining sync thread: %s", ex)
+            time.sleep(60)
+
+    _mining_sync_thread = threading.Thread(
+        target=_loop, name="blockvase-mining-sync", daemon=True
+    )
+    _mining_sync_thread.start()
+
+
 def _request_admin_token(body: dict[str, Any] | None = None) -> str:
     body = body or {}
     return (
@@ -915,7 +1119,20 @@ def get_mining_payout():
     token_err = _require_admin_token(cfg)
     if token_err:
         return token_err
-    return jsonify({"address": _current_mining_payout_address(cfg)})
+    address = _current_mining_payout_address(cfg)
+    # Do not block Settings on wallet/DATUM work during IBD — kick a background attempt.
+    if (
+        not address
+        and _is_setup_complete(cfg)
+        and not _is_wifi_recovery(cfg)
+    ):
+        threading.Thread(
+            target=_ensure_node_mining_payout,
+            kwargs={"cfg": cfg},
+            name="blockvase-mining-payout-init",
+            daemon=True,
+        ).start()
+    return jsonify(_mining_status_fields(cfg, address))
 
 
 @app.post("/api/mining-payout")
@@ -927,43 +1144,66 @@ def set_mining_payout():
         return token_err
 
     address = str(body.get("address", "")).strip()
-    if not address:
-        return _json_err("Mining payout address is required.")
-
-    if os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() != "true":
-        cfg["mining_payout_address"] = address
-        save_config(cfg)
-        return _json_ok(
-            address=address,
-            message="Address saved, but mining services were not updated because system actions are disabled.",
-            applied=False,
-        )
-
-    script = _privileged_script("set-mining-payout.sh")
-    if not script.exists():
-        return _json_err("Mining payout helper is not installed.", 500)
-
+    source = "custom"
     try:
-        result = subprocess.run(
-            ["sudo", str(script), address],
-            timeout=60,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
+        if address_is_mine(state.rpc, cfg.get("rpc") or {}, address):
+            source = "node"
+    except Exception:
+        pass
+    resp = _apply_mining_payout_address(cfg, address, source=source)
+    if isinstance(resp, tuple):
+        return resp
+    # Enrich success payload with IBD / mining-ready flags.
+    sync_fields = _mining_status_fields(load_config(), address)
+    data = resp.get_json() if hasattr(resp, "get_json") else {}
+    if not isinstance(data, dict):
+        data = {}
+    msg = data.get("message") or "Mining payout address saved."
+    if sync_fields.get("initialblockdownload"):
+        msg = (
+            "Payout address saved. The node is still syncing (IBD); "
+            "solo hashing starts automatically when sync finishes."
         )
-    except (OSError, subprocess.SubprocessError) as ex:
-        _log.exception("set-mining-payout failed")
-        return _json_err(f"Could not update mining payout address: {ex}", 500)
+    return _json_ok(
+        applied=bool(data.get("applied", True)),
+        message=msg,
+        **{k: sync_fields[k] for k in sync_fields},
+    )
 
-    if result.returncode != 0:
-        msg = (result.stderr or result.stdout or "Mining payout helper failed.").strip()
-        return _json_err(msg[-500:], 400)
 
-    cfg["mining_payout_address"] = address
-    save_config(cfg)
-    return _json_ok(address=address, message="Mining payout address saved.", applied=True)
+@app.post("/api/mining-payout/generate")
+def generate_mining_payout():
+    """Create a fresh receive address in the local Knots wallet and apply it as payout."""
+    body = request.get_json(force=True, silent=True) or {}
+    cfg = load_config()
+    token_err = _require_admin_token(cfg, body)
+    if token_err:
+        return token_err
+    try:
+        # Works during IBD — only needs wallet RPC, not a synced tip.
+        address = new_mining_payout_address(state.rpc, cfg.get("rpc") or {})
+    except Exception as ex:
+        _log.exception("generate mining payout failed")
+        return _json_err(f"Could not generate address from this node: {ex}", 500)
+    sync = node_sync_status(state.rpc, cfg.get("rpc") or {})
+    msg = "Generated a new payout address from this node’s wallet and applied it."
+    if sync.get("initialblockdownload"):
+        msg = (
+            "Generated a payout address from this node’s wallet. "
+            "The node is still syncing (IBD); solo hashing starts when sync finishes."
+        )
+    resp = _apply_mining_payout_address(cfg, address, source="node", message=msg)
+    if isinstance(resp, tuple):
+        return resp
+    sync_fields = _mining_status_fields(load_config(), address)
+    data = resp.get_json() if hasattr(resp, "get_json") else {}
+    if not isinstance(data, dict):
+        data = {}
+    return _json_ok(
+        applied=bool(data.get("applied", True)),
+        message=data.get("message") or msg,
+        **{k: sync_fields[k] for k in sync_fields},
+    )
 
 
 @app.get("/api/display-offset")
@@ -1011,6 +1251,7 @@ def save_all():
         return token_err
 
     try:
+        was_setup_complete = _is_setup_complete(cfg)
         cfg["device_name"] = _safe_device_name(
             str(body.get("deviceName", cfg.get("device_name") or "blockvase"))
         )
@@ -1041,6 +1282,14 @@ def save_all():
 
         save_config(cfg)
         _sync_hostname(cfg["device_name"])
+
+        # First-time setup: create a Knots wallet address for solo mining payouts.
+        if home_wifi and not was_setup_complete and not _current_mining_payout_address(cfg):
+            threading.Thread(
+                target=_ensure_node_mining_payout,
+                name="blockvase-mining-payout-init",
+                daemon=True,
+            ).start()
 
         reboot_scheduled = False
         wifi_switch_started = False
@@ -1356,6 +1605,7 @@ def factory_reset():
     cfg["totp_secret_enc"] = ""
     cfg["totp_pending_secret_enc"] = ""
     cfg["mining_payout_address"] = ""
+    cfg["mining_payout_source"] = ""
     cfg["rpc"] = json.loads(json.dumps(DEFAULT_CONFIG["rpc"]))
     cfg["rpc"].update(preserved_rpc)
     _apply_local_rpc(cfg)
@@ -1553,6 +1803,7 @@ def setup_qr():
 
 
 _start_update_check_thread()
+_start_mining_sync_thread()
 
 
 if __name__ == "__main__":

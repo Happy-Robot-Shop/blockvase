@@ -381,6 +381,12 @@ clear_mining_runtime() {
   else
     rm -f /etc/blockvase/datum_gateway_config.json
   fi
+  # Never ship the same mining wallet keys to every clone.
+  if command -v bitcoin-cli >/dev/null 2>&1 && [[ -f /etc/bitcoin/bitcoin.conf ]]; then
+    bitcoin-cli -conf=/etc/bitcoin/bitcoin.conf -datadir=/var/lib/bitcoind \
+      unloadwallet blockvase >/dev/null 2>&1 || true
+  fi
+  rm -rf /var/lib/bitcoind/wallets/blockvase 2>/dev/null || true
   if [[ -x "${PROJECT_DIR}/scripts/blockvase-miner-refresh-env.sh" ]]; then
     BLOCKVASE_SERVICE_USER=blockvase "${PROJECT_DIR}/scripts/blockvase-miner-refresh-env.sh" || true
   fi
@@ -417,6 +423,7 @@ cfg["totp_pending_secret_enc"] = ""
 cfg["admin_username"] = ""
 cfg["admin_password_hash"] = ""
 cfg["mining_payout_address"] = ""
+cfg["mining_payout_source"] = ""
 cfg.pop("mining_simulation_enabled", None)
 cfg.setdefault("device_name", "blockvase")
 if isinstance(cfg.get("rpc"), dict):

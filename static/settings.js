@@ -367,12 +367,48 @@ function loadTheme() {
     .catch(() => {});
 }
 
+function setMiningPayoutSourceNote(d) {
+  const note = document.getElementById("miningPayoutSourceNote");
+  if (!note) return;
+  const address = (d && d.address) || "";
+  const source = (d && d.source) || "";
+  if (!address) {
+    if (d && d.initialblockdownload) {
+      note.style.display = "block";
+      note.textContent =
+        "No payout address yet. One can be generated while the node syncs; hashing waits until IBD finishes.";
+    } else {
+      note.style.display = "none";
+      note.textContent = "";
+    }
+    return;
+  }
+  note.style.display = "block";
+  let text =
+    source === "node"
+      ? "Currently using an address from this device’s Bitcoin Knots wallet."
+      : "Currently using a custom address (not from this device’s wallet).";
+  if (d.initialblockdownload || d.mining_ready === false) {
+    text +=
+      " Node is still syncing — address is saved, but solo hashing starts after IBD/catch-up.";
+  }
+  note.textContent = text;
+}
+
 function loadMiningPayout() {
   fetch(withToken("/api/mining-payout"))
     .then(r => r.json())
     .then(d => {
       const input = document.getElementById("miningPayoutAddress");
-      if (input) input.value = d.address || "";
+      if (input) {
+        if (d.address) {
+          input.value = d.address;
+        } else if (!input.value) {
+          // Background generation may still be running after first setup.
+          setTimeout(loadMiningPayout, 2500);
+        }
+      }
+      setMiningPayoutSourceNote(d || {});
     })
     .catch(() => {});
 }
@@ -401,9 +437,43 @@ function saveMiningPayout(e) {
       hideLoading();
       if (d.success) {
         input.value = d.address || address;
+        setMiningPayoutSourceNote(d);
         showStatus(statusDiv, d.applied === false ? "info" : "success", d.message || "Mining payout address saved");
       } else {
         showStatus(statusDiv, "error", d.error || "Failed to save mining payout address");
+      }
+    })
+    .catch(err => {
+      hideLoading();
+      showStatus(statusDiv, "error", "Error: " + err.message);
+    });
+}
+
+function generateMiningPayout() {
+  const input = document.getElementById("miningPayoutAddress");
+  const statusDiv = document.getElementById("miningPayoutStatus");
+  showLoading("Generating address from this node...");
+  showStatus(
+    statusDiv,
+    "info",
+    "Generating a new address from this node’s wallet (works during IBD)..."
+  );
+  const payload = {};
+  if (setupToken) payload.token = setupToken;
+  fetch(withToken("/api/mining-payout/generate"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+    .then(r => parseJsonResponse(r))
+    .then(d => {
+      hideLoading();
+      if (d.success) {
+        if (input) input.value = d.address || "";
+        setMiningPayoutSourceNote(d);
+        showStatus(statusDiv, d.applied === false ? "info" : "success", d.message || "Generated payout address");
+      } else {
+        showStatus(statusDiv, "error", d.error || "Failed to generate address");
       }
     })
     .catch(err => {
@@ -861,6 +931,7 @@ document.getElementById("adminLoginTotpCancel")?.addEventListener("click", () =>
   if (statusDiv) statusDiv.style.display = "none";
 });
 document.getElementById("miningPayoutForm")?.addEventListener("submit", saveMiningPayout);
+document.getElementById("miningPayoutGenerateBtn")?.addEventListener("click", generateMiningPayout);
 document.getElementById("saveThemeBtn")?.addEventListener("click", saveTheme);
 document.getElementById("totpBeginBtn")?.addEventListener("click", beginTotpSetup);
 document.getElementById("totpConfirmBtn")?.addEventListener("click", confirmTotpSetup);
