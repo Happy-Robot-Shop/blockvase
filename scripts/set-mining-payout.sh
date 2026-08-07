@@ -77,7 +77,11 @@ write_datum_config() {
   if [[ -f "${DATUM_CONFIG}" ]]; then
     local tmp
     tmp="$(mktemp)"
-    jq --arg addr "${addr}" '.mining.pool_address = $addr' "${DATUM_CONFIG}" >"${tmp}"
+    jq --arg addr "${addr}" \
+      '.mining.pool_address = $addr
+       | .mining.coinbase_tag_primary = "Blockvase"
+       | .mining.coinbase_tag_secondary = "The Great Decentralization"' \
+      "${DATUM_CONFIG}" >"${tmp}"
     cat "${tmp}" >"${DATUM_CONFIG}"
     rm -f "${tmp}"
   else
@@ -96,7 +100,7 @@ write_datum_config() {
         mining: {
           pool_address: $addr,
           coinbase_tag_primary: "Blockvase",
-          coinbase_tag_secondary: "DATUM solo",
+          coinbase_tag_secondary: "The Great Decentralization",
           coinbase_unique_id: 4242
         },
         api: { admin_password: "", listen_addr: "127.0.0.1", listen_port: 7152, modify_conf: false },

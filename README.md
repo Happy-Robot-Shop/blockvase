@@ -140,7 +140,7 @@ Blockvase stands on open-source Bitcoin, mining, and Raspberry Pi work. Logos be
   - Build/install path and systemd unit templating
   - Generated solo-mining JSON config (RPC user/password from Knots, payout address, local Stratum bind; no remote pool)
   - DATUM stays off until a payout address exists and the node is synced (address is created at setup; DATUM requires a valid `mining.pool_address`)
-  - Coinbase tags set to Blockvase / DATUM solo in generated config
+  - Coinbase tags set to Blockvase / The Great Decentralization in generated config
 
 ### PiAxe-miner (and PyMiner)
 
