@@ -56,6 +56,7 @@ from .totp import generate_secret, otpauth_uri, verify_totp
 
 
 app = Flask(__name__, template_folder="../templates", static_folder="../static")
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 state = StateManager()
 _log = logging.getLogger("blockvase")
 if not _log.handlers:

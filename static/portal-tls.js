@@ -1,5 +1,81 @@
 /* Portal TLS card + platform-specific CA install guide (auto-detect + dropdown). */
 (function () {
+  function placePortalTlsCard(el) {
+    if (!el) return;
+    const header = document.querySelector(".container > header") || document.querySelector("header");
+    const nav = document.getElementById("portalSectionNav");
+    // Keep certificate card above the tab switcher: header → card → nav → …
+    if (nav && nav.parentNode) {
+      if (el.nextElementSibling !== nav) nav.parentNode.insertBefore(el, nav);
+      return;
+    }
+    if (header && header.parentNode) {
+      if (el.previousElementSibling !== header) header.insertAdjacentElement("afterend", el);
+      return;
+    }
+    if (!el.parentNode) document.body.insertBefore(el, document.body.firstChild);
+  }
+
+  function ensurePortalSectionNav() {
+    if (!document.body || !document.body.classList.contains("portal-page")) return;
+    let nav = document.getElementById("portalSectionNav");
+    if (nav) {
+      const card = document.getElementById("portalTlsCard");
+      if (card) placePortalTlsCard(card);
+      else {
+        const header = document.querySelector(".container > header");
+        if (header && nav.previousElementSibling !== header) {
+          header.insertAdjacentElement("afterend", nav);
+        }
+      }
+      document.body.classList.add("portal-has-section-nav");
+      return;
+    }
+    const header = document.querySelector(".container > header");
+    if (!header || !header.parentNode) return;
+
+    const path = (location.pathname || "/").replace(/\/+$/, "") || "/";
+    const tabs = [
+      { href: "/", label: "Metrics", active: path === "/" },
+      { href: "/wallet", label: "Wallet", active: path === "/wallet" || path.startsWith("/wallet/") },
+      {
+        href: "/settings",
+        label: "Settings",
+        active: path === "/settings" || path === "/setup" || path.startsWith("/settings/"),
+      },
+    ];
+
+    nav = document.createElement("nav");
+    nav.id = "portalSectionNav";
+    nav.className = "portal-tab-nav";
+    nav.setAttribute("aria-label", "Blockvase portal sections");
+    nav.setAttribute("role", "tablist");
+    nav.innerHTML = tabs
+      .map((tab) => {
+        const cls = "portal-tab-button" + (tab.active ? " is-active" : "");
+        return (
+          '<a href="' +
+          tab.href +
+          '" class="' +
+          cls +
+          '" role="tab" aria-selected="' +
+          (tab.active ? "true" : "false") +
+          '">' +
+          tab.label +
+          "</a>"
+        );
+      })
+      .join("");
+
+    const card = document.getElementById("portalTlsCard");
+    if (card && card.parentNode) {
+      card.insertAdjacentElement("afterend", nav);
+    } else {
+      header.insertAdjacentElement("afterend", nav);
+    }
+    document.body.classList.add("portal-has-section-nav");
+  }
+
   if (!window.BlockvaseTlsGuide) {
     const PLATFORMS = [
       { id: "ios", label: "iPhone / iPad" },
@@ -183,20 +259,16 @@
 
   function ensureCard() {
     let el = document.getElementById("portalTlsCard");
-    if (el) return el;
-    el = document.createElement("div");
-    el.id = "portalTlsCard";
-    el.className = "metric-board metric-board--dense portal-tls-card";
-    el.style.display = "none";
-    el.setAttribute("hidden", "");
-    el.setAttribute("role", "region");
-    el.setAttribute("aria-label", "Portal certificate");
-    const header = document.querySelector(".container > header") || document.querySelector("header");
-    if (header && header.parentNode) {
-      header.parentNode.insertBefore(el, header.nextSibling);
-    } else {
-      document.body.insertBefore(el, document.body.firstChild);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "portalTlsCard";
+      el.className = "metric-board metric-board--dense portal-tls-card";
+      el.style.display = "none";
+      el.setAttribute("hidden", "");
+      el.setAttribute("role", "region");
+      el.setAttribute("aria-label", "Portal certificate");
     }
+    placePortalTlsCard(el);
     return el;
   }
 
@@ -244,9 +316,11 @@
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
+      ensurePortalSectionNav();
       window.refreshPortalTlsBanner();
     });
   } else {
+    ensurePortalSectionNav();
     window.refreshPortalTlsBanner();
   }
 })();

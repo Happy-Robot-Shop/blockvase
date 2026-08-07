@@ -8,7 +8,7 @@
     <meta name="referrer" content="no-referrer" />
     <link rel="stylesheet" href="/static/style.css" />
   </head>
-  <body class="portal-page settings-page wallet-page" data-theme="{{ theme | default('default') }}">
+  <body class="portal-page settings-page wallet-page portal-has-section-nav" data-theme="{{ theme | default('default') }}">
     <div class="portal-splash-overlay" id="portalSplashOverlay" aria-hidden="true"></div>
     <div class="loading-overlay" id="loadingOverlay">
       <div class="loading-spinner"></div>
@@ -20,12 +20,14 @@
           <img class="logo" src="/media/logo_200.png" alt="Blockvase" />
           <h1 id="deviceNameHeader">Wallet</h1>
         </div>
-        <div class="header-right">
-          <a href="/" class="btn-icon settings-back-link" aria-label="Back to portal" title="Back to portal"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></a>
-        </div>
+        <div class="header-right"></div>
       </header>
-
       <div id="portalTlsCard" class="metric-board metric-board--dense portal-tls-card" hidden style="display:none;" role="region" aria-label="Portal certificate"></div>
+      <nav id="portalSectionNav" class="portal-tab-nav" aria-label="Blockvase portal sections" role="tablist">
+        <a href="/" class="portal-tab-button" role="tab" aria-selected="false">Metrics</a>
+        <a href="/wallet" class="portal-tab-button is-active" role="tab" aria-selected="true">Wallet</a>
+        <a href="/settings" class="portal-tab-button" role="tab" aria-selected="false">Settings</a>
+      </nav>
 
       <div id="adminAuthSection" class="settings-card metric-board metric-board--dense" style="display:none;">
         <h2 class="metric-board-title">Wallet Login</h2>

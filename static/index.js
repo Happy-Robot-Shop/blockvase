@@ -274,16 +274,23 @@ function retargetBarPendingHtml() {
   );
 }
 
-function renderPortalSyncStatus(el, syncState) {
-  if (!el) return;
-  const vp = syncState.verificationprogress != null ? Number(syncState.verificationprogress) : null;
+function portalSyncConnectionText(syncState) {
+  const vp = syncState && syncState.verificationprogress != null ? Number(syncState.verificationprogress) : null;
   const pct = vp != null && Number.isFinite(vp) ? (vp * 100).toFixed(1) : null;
-  const blocks = syncState.blocks != null ? Number(syncState.blocks) : null;
-  let text = "Chain syncing";
-  if (syncState.initialblockdownload === true) text = "Initial block download";
-  if (pct != null) text += ": " + pct + "% verified";
-  if (blocks != null && Number.isFinite(blocks)) text += " · block " + formatNumber(blocks);
-  setPortalStatusBadge(el, "syncing", text);
+  let text = "Syncing";
+  if (syncState && syncState.initialblockdownload === true) text = "IBD";
+  if (pct != null) text += " " + pct + "%";
+  return text;
+}
+
+function clearPortalStatusLine(el) {
+  if (el) el.innerHTML = "";
+}
+
+function renderPortalSyncStatus(el, syncState) {
+  // Status line above the mempool is unused; connection state lives under Node → Connection.
+  clearPortalStatusLine(el);
+  void syncState;
 }
 
 function syncPendingKpiValue(syncState, field) {
@@ -322,16 +329,18 @@ function renderPortalSyncPendingMetrics(syncState, statusEl, beforeEl, upperDeta
     "metric-board--chain metric-board--dense"
   );
 
+  const connectionHtml =
+    '<span class="portal-node-connection">' + escapeHtml(portalSyncConnectionText(syncState)) + "</span>";
   const compactSecondaryHtml = metricBoard(
     "",
     '<div class="metric-cluster-grid">' +
       metricClusterHtml(
         "Node",
         metricKvHtml([
+          ["Connection", connectionHtml],
           ["Verified", verified],
           ["Chain", pending],
           ["Pruned", pending],
-          ["Version", pending],
         ])
       ) +
       metricClusterHtml(
@@ -587,11 +596,7 @@ function patchPortalSyncPendingMetrics(syncState, statusEl, beforeEl, upperDetai
   const vp = syncState.verificationprogress != null ? Number(syncState.verificationprogress) : null;
   const pct = vp != null && Number.isFinite(vp) ? (vp * 100).toFixed(1) : null;
   const blocks = syncState.blocks != null ? Number(syncState.blocks) : null;
-  let text = "Chain syncing";
-  if (syncState.initialblockdownload === true) text = "Initial block download";
-  if (pct != null) text += ": " + pct + "% verified";
-  if (blocks != null && Number.isFinite(blocks)) text += " · block " + formatNumber(blocks);
-  setPortalStatusBadge(statusEl, "syncing", text);
+  clearPortalStatusLine(statusEl);
 
   if (blocks != null && Number.isFinite(blocks)) {
     patchPortalKpi(grid, "Height", formatNumber(blocks), "");
@@ -604,6 +609,11 @@ function patchPortalSyncPendingMetrics(syncState, statusEl, beforeEl, upperDetai
 
   const verified =
     vp != null && Number.isFinite(vp) ? (vp * 100).toFixed(1) + "%" : portalMetricPendingHtml();
+  patchMetricKv(
+    upperDetailEl,
+    "Connection",
+    '<span class="portal-node-connection">' + escapeHtml(portalSyncConnectionText(syncState)) + "</span>"
+  );
   patchMetricKv(upperDetailEl, "Verified", verified);
   return true;
 }
@@ -612,10 +622,7 @@ function patchPortalLiveMetrics(d, statusEl, beforeEl, upperDetailEl) {
   if (portalMetricsRenderMode !== "live" || !portalLiveStructureReady()) return false;
   const grid = document.getElementById("metricsGrid");
   const nodeVer = (d.node_version || d.nodeVersion || "").trim();
-  const statusText = nodeVer
-    ? "Connected to BIP-110 compliant node " + (nodeVer.startsWith("v") ? nodeVer : "v" + nodeVer)
-    : "Connected to BIP-110 compliant node";
-  setPortalStatusBadge(statusEl, "connected", statusText);
+  clearPortalStatusLine(statusEl);
 
   const blocksUntilRetarget = d.blocks_until_retarget ?? 2016;
   const progressPct = (((2016 - blocksUntilRetarget) / 2016) * 100).toFixed(1);
@@ -624,7 +631,7 @@ function patchPortalLiveMetrics(d, statusEl, beforeEl, upperDetailEl) {
   const hashParts = formatHashRateParts(d.networkhashps || 0);
   const chainParts = formatBytesParts(d.size_on_disk || 0);
   const mempoolParts = formatBytesParts(d.mempool_size || d.mempool_bytes || 0);
-  const nodeVerStr = nodeVer ? (nodeVer.startsWith("v") ? nodeVer : "v" + nodeVer) : "n/a";
+  const nodeVerStr = nodeVer ? (nodeVer.startsWith("v") ? nodeVer : "v" + nodeVer) : "N/A";
   const mempoolSize = mempoolParts.value + (mempoolParts.unit ? " " + mempoolParts.unit : "");
 
   if (!patchPortalKpi(grid, "Height", formatNumber(d.blocks || 0), "")) return false;
@@ -635,10 +642,14 @@ function patchPortalLiveMetrics(d, statusEl, beforeEl, upperDetailEl) {
   if (!patchPortalKpi(grid, "Peers", formatNumber(d.connections || 0), "")) return false;
   if (!patchRetargetBar(beforeEl, blocksUntilRetarget, progressPct)) return false;
 
+  patchMetricKv(
+    upperDetailEl,
+    "Connection",
+    '<span class="portal-node-connection">' + escapeHtml(nodeVerStr) + "</span>"
+  );
   patchMetricKv(upperDetailEl, "Verified", verifyPct.toFixed(1) + "%");
   patchMetricKv(upperDetailEl, "Chain", String(d.chain || "unknown"));
   patchMetricKv(upperDetailEl, "Pruned", d.pruned ? "Yes" : "No");
-  patchMetricKv(upperDetailEl, "Version", nodeVerStr);
   patchMetricKv(upperDetailEl, "Size", mempoolSize);
   patchMetricKv(
     upperDetailEl,
@@ -863,10 +874,7 @@ async function loadMetrics() {
     }
 
     const nodeVer = (d.node_version || d.nodeVersion || "").trim();
-    const statusText = nodeVer
-      ? "Connected to BIP-110 compliant node " + (nodeVer.startsWith("v") ? nodeVer : "v" + nodeVer)
-      : "Connected to BIP-110 compliant node";
-    setPortalStatusBadge(status, "connected", statusText);
+    clearPortalStatusLine(status);
 
     const blocksUntilRetarget = d.blocks_until_retarget ?? 2016;
     const progressPct = ((2016 - blocksUntilRetarget) / 2016 * 100).toFixed(1);
@@ -895,7 +903,7 @@ async function loadMetrics() {
 
     const beforeMempoolHtml = retargetBarHtml(blocksUntilRetarget, progressPct);
 
-    const nodeVerStr = nodeVer ? (nodeVer.startsWith("v") ? nodeVer : "v" + nodeVer) : "n/a";
+    const nodeVerStr = nodeVer ? (nodeVer.startsWith("v") ? nodeVer : "v" + nodeVer) : "N/A";
     const mempoolSize =
       mempoolParts.value + (mempoolParts.unit ? " " + mempoolParts.unit : "");
 
@@ -907,10 +915,13 @@ async function loadMetrics() {
         metricClusterHtml(
           "Node",
           metricKvHtml([
+            [
+              "Connection",
+              '<span class="portal-node-connection">' + escapeHtml(nodeVerStr) + "</span>",
+            ],
             ["Verified", verifyPct.toFixed(1) + "%"],
             ["Chain", escapeHtml(String(d.chain || "unknown"))],
             ["Pruned", d.pruned ? "Yes" : "No"],
-            ["Version", escapeHtml(nodeVerStr)],
           ])
         ) +
         metricClusterHtml(

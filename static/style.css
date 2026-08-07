@@ -23,6 +23,8 @@ body.portal-page {
  --muted: #a68b6b;
  --accent: #f7931a;
  --orange: #f7931a;
+ --link: var(--accent);
+ --link-visited: color-mix(in srgb, var(--accent) 68%, #140c06);
  --portal-radius-lg: 14px;
  --portal-radius-md: 10px;
  --portal-shadow: 0 14px 46px rgba(0, 0, 0, 0.44), 0 1px 0 rgba(247, 147, 26, 0.07);
@@ -83,10 +85,80 @@ body.display-page .portal-splash-overlay.portal-splash-overlay--gone {
  }
 }
 
+
 body.portal-page .container {
  position: relative;
  z-index: 1;
 }
+
+/* Match blockvase.com link treatment (non-button anchors) */
+body.portal-page a:where(:not(.btn):not(.btn-icon):not(.btn-flat)) {
+ color: var(--link);
+}
+
+body.portal-page a:where(:not(.btn):not(.btn-icon):not(.btn-flat)):visited {
+ color: var(--link-visited);
+}
+
+body.portal-page a:where(:not(.btn):not(.btn-icon):not(.btn-flat)):hover {
+ color: var(--text);
+}
+
+@media (min-width: 701px) {
+ html:not(:has(body.display-page)) {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+ }
+}
+
+/* Transaction detail panel: same orange spinner overlay as blockvase.com */
+body.portal-page .tx-detail-loading-overlay {
+ position: absolute;
+ inset: 0;
+ z-index: 4;
+ display: flex;
+ align-items: center;
+ justify-content: center;
+ gap: 10px;
+ flex-direction: column;
+ background: rgba(10, 6, 4, 0.72);
+ transition: opacity 0.2s ease;
+}
+
+body.portal-page .tx-detail-loading-overlay[hidden] {
+ display: none;
+}
+
+body.portal-page .tx-detail-loading-overlay__spinner {
+ width: 28px;
+ height: 28px;
+ border: 2px solid rgba(247, 147, 26, 0.22);
+ border-top-color: #f7931a;
+ border-radius: 50%;
+ animation: portal-layout-spin 0.85s linear infinite;
+}
+
+body.portal-page .tx-detail-loading-overlay__label {
+ margin: 0;
+ color: var(--muted);
+ font-size: var(--portal-text-caption);
+ letter-spacing: 0.04em;
+ text-transform: uppercase;
+}
+
+body.portal-page .tx-detail-panel.is-loading .tx-table-view {
+ opacity: 0.35;
+}
+
+body[data-theme="ocean"].portal-page .tx-detail-loading-overlay {
+ background: rgba(6, 26, 46, 0.72);
+}
+
+body[data-theme="ocean"].portal-page .tx-detail-loading-overlay__spinner {
+ border: 2px solid rgba(34, 211, 238, 0.22);
+ border-top-color: #22d3ee;
+}
+
 
 body.portal-page .loading-overlay {
  background: rgba(10, 6, 4, 0.96);
@@ -125,8 +197,8 @@ body.portal-page .btn {
 
 body.portal-page .btn:not(.secondary):not(.danger):not(.btn-flat) {
  background: #ffffff;
- color: #0a0a0a;
- box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+ color: #000000;
+ box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
  font-weight: 600;
 }
 
@@ -140,8 +212,8 @@ body.portal-page .btn:not(.secondary):not(.danger):not(.btn-flat):hover {
 
 body.portal-page .btn:not(.secondary):not(.danger):not(.btn-flat):hover {
  background: #ffffff;
- color: #0a0a0a;
- box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+ color: #000000;
+ box-shadow: 0 4px 14px rgba(0, 0, 0, 0.38);
 }
 
 body.portal-page .btn.secondary,
@@ -251,6 +323,8 @@ body[data-theme="ocean"].portal-page {
  --muted: #7eb8c9;
  --accent: #22d3ee;
  --orange: #2dd4bf;
+ --link: var(--accent);
+ --link-visited: color-mix(in srgb, var(--accent) 68%, #041018);
  --portal-shadow: 0 12px 44px rgba(0, 12, 28, 0.55);
  background: #061a2e;
 }
@@ -270,14 +344,14 @@ body[data-theme="ocean"].portal-page select:focus {
 
 body[data-theme="ocean"].portal-page .btn:not(.secondary):not(.danger):not(.btn-flat) {
  background: #ffffff;
- color: #0a0a0a;
- box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+ color: #000000;
+ box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
 }
 
 body[data-theme="ocean"].portal-page .btn:not(.secondary):not(.danger):not(.btn-flat):hover {
  background: #ffffff;
- color: #0a0a0a;
- box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+ color: #000000;
+ box-shadow: 0 4px 14px rgba(0, 0, 0, 0.38);
 }
 
 body[data-theme="ocean"].portal-page .progress-bar-fill {
@@ -342,7 +416,7 @@ body.portal-page header h1 {
  margin: 0;
  font-size: var(--portal-text-device);
  line-height: 1;
- color: #ececec;
+ color: #ffffff;
  font-weight: 600;
 }
 
@@ -638,6 +712,35 @@ body.portal-page .portal-tab-button {
  background 0.2s ease,
  border-color 0.2s ease,
  color 0.2s ease;
+}
+
+/* Same tab chrome as blockvase.com, usable as page links on the device portal */
+body.portal-page a.portal-tab-button {
+ display: flex;
+ align-items: center;
+ justify-content: center;
+ text-decoration: none;
+ box-sizing: border-box;
+ color: var(--muted);
+}
+
+body.portal-page a.portal-tab-button:visited {
+ color: var(--muted);
+}
+
+body.portal-page a.portal-tab-button:hover {
+ color: var(--text);
+}
+
+body.portal-page a.portal-tab-button.is-active,
+body.portal-page a.portal-tab-button.is-active:visited {
+ color: var(--accent);
+}
+
+body.portal-page.portal-has-section-nav .portal-header-wallet,
+body.portal-page.portal-has-section-nav .portal-header-settings,
+body.portal-page.portal-has-section-nav .settings-back-link {
+ display: none !important;
 }
 
 body.portal-page .portal-tab-button:last-child {
@@ -2065,6 +2168,11 @@ body.portal-page .metric {
  border: none;
 }
 
+/* Connection status lives under Node → Connection (match blockvase.com metrics). */
+body.portal-page #status {
+ display: none !important;
+}
+
 body.portal-page #status .status-badge {
  margin-bottom: var(--portal-space-3);
 }
@@ -2692,10 +2800,14 @@ body.portal-page #metricsUpperDetail .portal-node-connection {
 }
 
 body.portal-page #metricsUpperDetail .portal-mining-promo a {
- color: var(--accent);
+ color: var(--link);
  font-weight: 650;
  text-decoration: underline;
  text-underline-offset: 2px;
+}
+
+body.portal-page #metricsUpperDetail .portal-mining-promo a:visited {
+ color: var(--link-visited);
 }
 
 body.portal-page #metricsUpperDetail .portal-mining-promo a:hover {
@@ -3328,7 +3440,7 @@ body.settings-page .form-row + .btn {
  border: none;
  border-radius: var(--portal-radius-md);
  background: #ffffff;
- color: #0a0a0a;
+ color: #000000;
  font-weight: 600;
  cursor: pointer;
  transition: all 0.2s ease;
