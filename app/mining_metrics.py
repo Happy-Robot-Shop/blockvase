@@ -97,12 +97,8 @@ def fetch_mining_metrics(timeout_override: float | None = None) -> dict[str, Any
     if not isinstance(data, dict):
         return zero_mining_payload("unexpected payload")
 
-    # Prefer lifetime GH/s (stable); fall back to EMA / legacy hashing_speed.
-    ghs = _num(data.get("hashing_speed_lifetime"))
-    if ghs <= 0:
-        ghs = _num(data.get("hashing_speed_ema"))
-    if ghs <= 0:
-        ghs = _num(data.get("hashing_speed"))
+    # Rolling ~30 min share-work average from the miner (GH/s).
+    ghs = _num(data.get("hashing_speed"))
     hs = ghs * 1e9
 
     accepted = _int(data.get("accepted"))

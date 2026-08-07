@@ -18,10 +18,7 @@ class Stats:
         self.vdomain2 = 1200
         self.vdomain3 = 1200
         self.vdomain4 = 1200
-        self.hashing_speed = 0.0
-        # Lifetime average and time-smoothed EMA (GH/s); hashing_speed tracks EMA for display.
-        self.hashing_speed_lifetime = 0.0
-        self.hashing_speed_ema = 0.0
+        self.hashing_speed = 0.0  # Rolling ~30 min share-work average (GH/s)
         # Effective vs configured max clock (thermal governor may lower effective).
         self.asic_frequency_mhz = 0.0
         self.asic_frequency_target_mhz = 0.0

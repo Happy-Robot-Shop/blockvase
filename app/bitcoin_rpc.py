@@ -81,7 +81,7 @@ class BitcoinRpcClient:
             raise RuntimeError(str(exc)) from exc
 
     def local_cli_version_string(self) -> str:
-        """Full client version from ``bitcoin-cli --version`` (e.g. v29.3.knots20260508)."""
+        """Full client version from ``bitcoin-cli --version`` (e.g. v29.4.knots20260508)."""
         candidates: list[str] = []
         for p in ("/usr/local/bin/bitcoin-cli", shutil.which("bitcoin-cli") or ""):
             if not p:

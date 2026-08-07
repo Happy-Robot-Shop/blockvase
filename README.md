@@ -34,7 +34,7 @@ To build from this repo on a Raspberry Pi, start with **[Path A: Fresh install](
 | **Login user** | Must be named **`blockvase`** |
 | **Display** | Full-screen kiosk (not the Pi desktop) |
 | **Networking** | NetworkManager |
-| **Node** | [Bitcoin Knots](https://github.com/bitcoinknots/bitcoin/releases/tag/v29.3.knots20260508) (full archival, local RPC only) |
+| **Node** | [Bitcoin Knots](https://github.com/bitcoinknots/bitcoin/releases/tag/v29.4.knots20260508) (full archival, local RPC only) |
 | **Mining** | Local [DATUM Gateway](https://github.com/OCEAN-xyz/datum_gateway) (solo from Knots GBT) + BM1366 (PiAxe); Stratum v1 only to localhost |
 | **Buy** | Pre-assembled & synced: [blockvase.com](https://blockvase.com) |
 | **License** | GPL-3.0 for Blockvase-authored software and HAT design; see [License](#license) |

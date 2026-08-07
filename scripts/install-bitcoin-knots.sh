@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install Bitcoin Knots as a local full archival node.
-# Release: https://github.com/bitcoinknots/bitcoin/releases/tag/v29.3.knots20260508
+# Release: https://github.com/bitcoinknots/bitcoin/releases/tag/v29.4.knots20260508
 #
 # - Downloads the matching *-linux-gnu.tar.gz for this CPU from the GitHub release API
 # - Installs binaries under /opt/bitcoin-knots, symlinks in /usr/local/bin
@@ -15,7 +15,7 @@
 set -euo pipefail
 
 REPO="bitcoinknots/bitcoin"
-TAG="v29.3.knots20260508"
+TAG="v29.4.knots20260508"
 PROJECT_DIR="${1:-}"
 if [[ -z "${PROJECT_DIR}" ]]; then
   PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -1,6 +1,6 @@
 [Unit]
 Description=Bitcoin Knots (full archival node, local JSON-RPC)
-Documentation=https://github.com/bitcoinknots/bitcoin/releases/tag/v29.3.knots20260508
+Documentation=https://github.com/bitcoinknots/bitcoin/releases/tag/v29.4.knots20260508
 After=network-online.target
 Wants=network-online.target
 # Wait for clone-safety / root expand / AP handoff in blockvase-ap before opening the chain DB.

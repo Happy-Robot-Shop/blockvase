@@ -9,7 +9,6 @@ import logging
 import random
 import copy
 import os
-import math
 import yaml
 import json
 from pathlib import Path
@@ -97,11 +96,8 @@ class BM1366Miner:
         self.found_timestamps = list()
 
         self.shares = list()
-        # Cumulative share work for lifetime / EMA hashrate (avoids noisy fixed 600s window).
-        self._hash_work_total = 0
-        self._hash_last_ts = None
-        self._hash_rate_ema = 0.0
-        self._hash_ema_tau_sec = 1200.0  # ~20 min time-constant
+        # Rolling share-work window for displayed hashrate (tracks thermal/ambient changes).
+        self._hash_window_sec = 1800  # 30 minutes
         self.stats = influx.Stats()
 
         self.display = SSD1306(self.stats)
@@ -442,7 +438,7 @@ class BM1366Miner:
             with self.stats.lock:
                 self.stats.total_uptime += 1
                 self.stats.uptime += 1
-                self._refresh_hash_rate_lifetime_locked()
+                self._refresh_hash_rate_locked()
             time.sleep(1)
 
         logging.info("uptime counter thread ended ...")
@@ -710,73 +706,48 @@ class BM1366Miner:
             self.found_timestamps.pop(0)
 
 
-    def _lifetime_hash_rate_gh_locked(self):
-        """Lifetime GH/s from cumulative share work / uptime. Caller holds stats.lock."""
-        if self._hash_work_total <= 0:
-            return 0.0
-        uptime = max(int(self.stats.uptime), 1)
-        return (self._hash_work_total / uptime) / 1e9
+    def _prune_shares_locked(self, now=None):
+        """Drop shares older than the rolling window. Caller holds stats.lock."""
+        now = time.time() if now is None else now
+        cutoff = now - self._hash_window_sec
+        while self.shares and self.shares[0][2] < cutoff:
+            self.shares.pop(0)
 
-    def _refresh_hash_rate_lifetime_locked(self):
-        """Keep lifetime (and display) current as uptime advances between shares."""
-        lifetime_gh = self._lifetime_hash_rate_gh_locked()
-        self.stats.hashing_speed_lifetime = lifetime_gh
-        if self._hash_rate_ema <= 0 and lifetime_gh > 0:
-            self._hash_rate_ema = lifetime_gh
-        elif self._hash_rate_ema > 0 and lifetime_gh > 0:
-            # Gentle pull toward lifetime when shares are sparse
-            self._hash_rate_ema = 0.997 * self._hash_rate_ema + 0.003 * lifetime_gh
-        self.stats.hashing_speed_ema = self._hash_rate_ema
-        self.stats.hashing_speed = (
-            self._hash_rate_ema if self._hash_rate_ema > 0 else lifetime_gh
-        )
+    def _window_hash_rate_gh_locked(self, now=None):
+        """
+        GH/s from share-work in the last `_hash_window_sec` seconds.
+        Before the window is full, divide by uptime so early shares aren't diluted.
+        Caller holds stats.lock.
+        """
+        now = time.time() if now is None else now
+        self._prune_shares_locked(now)
+        if not self.shares:
+            return 0.0
+        work = 0
+        for _count, difficulty, _ts in self.shares:
+            work += int(difficulty) << 32
+        denom = min(max(int(self.stats.uptime), 1), self._hash_window_sec)
+        return (work / denom) / 1e9
+
+    def _refresh_hash_rate_locked(self):
+        """Recompute rolling-window hashrate as uptime advances / old shares age out."""
+        self.stats.hashing_speed = self._window_hash_rate_gh_locked()
 
     def _update_hash_rates(self, difficulty):
-        """
-        Update lifetime + EMA hashrate after a valid share.
-
-        Lifetime: total share-work / uptime (stable truth).
-        EMA: time-constant smoothed inter-share rate (~20 min), clamped vs lifetime
-        so high pool difficulty doesn't produce 2x phantom spikes.
-        Primary stats.hashing_speed follows the EMA (lifetime until EMA seeds).
-        """
-        now = time.time()
-        work = int(difficulty) << 32
+        """Refresh displayed hashrate after a valid share (difficulty unused; work is in self.shares)."""
         with self.stats.lock:
-            self._hash_work_total += work
-            lifetime_gh = self._lifetime_hash_rate_gh_locked()
-            self.stats.hashing_speed_lifetime = lifetime_gh
-
-            if self._hash_last_ts is None or self._hash_rate_ema <= 0:
-                self._hash_rate_ema = lifetime_gh
-            else:
-                dt = max(now - self._hash_last_ts, 1e-3)
-                instant_gh = (work / dt) / 1e9
-                # Cap absurd bursts (two shares milliseconds apart)
-                cap = max(lifetime_gh * 3.0, 750.0)
-                instant_gh = min(instant_gh, cap)
-                alpha = 1.0 - math.exp(-dt / self._hash_ema_tau_sec)
-                alpha = min(max(alpha, 0.02), 0.35)
-                self._hash_rate_ema = (
-                    alpha * instant_gh + (1.0 - alpha) * self._hash_rate_ema
-                )
-
-            self._hash_last_ts = now
-            self.stats.hashing_speed_ema = self._hash_rate_ema
-            self.stats.hashing_speed = (
-                self._hash_rate_ema if self._hash_rate_ema > 0 else lifetime_gh
-            )
+            self._refresh_hash_rate_locked()
             logging.debug(
-                "\033[32mhash rate: ema=%.1f lifetime=%.1f GH/s\033[0m",
-                self.stats.hashing_speed_ema,
-                self.stats.hashing_speed_lifetime,
+                "\033[32mhash rate: %.1f GH/s (last %ds)\033[0m",
+                self.stats.hashing_speed,
+                self._hash_window_sec,
             )
             return self.stats.hashing_speed
 
-    def hash_rate(self, time_period=600):
-        """Backward-compatible helper; returns EMA/lifetime GH/s (time_period unused)."""
+    def hash_rate(self, time_period=None):
+        """Backward-compatible helper; returns rolling-window GH/s."""
         with self.stats.lock:
-            self._refresh_hash_rate_lifetime_locked()
+            self._refresh_hash_rate_locked()
             return self.stats.hashing_speed
 
     def _set_target(self, target):
