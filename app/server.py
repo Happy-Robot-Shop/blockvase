@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 import qrcode
 from flask import Flask, jsonify, make_response, redirect, render_template, request, send_from_directory, url_for
-from qrcode.image.svg import SvgImage
+from qrcode.image.svg import SvgImage, SvgPathImage
 from waitress import serve
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -50,7 +50,7 @@ from .mining_wallet import (
     spend_wallet_recent_transactions,
     validate_bitcoin_address,
 )
-from .state import StateManager
+from .state import StateManager, reset_portal_stats
 from .tls_cert import read_cert_pem, tls_status
 from .totp import generate_secret, otpauth_uri, verify_totp
 
@@ -304,6 +304,33 @@ def _schedule_reboot_after_save(delay_sec: float = 8.0) -> bool:
 
     threading.Thread(target=_run, daemon=True).start()
     return True
+
+
+def _qr_svg_for_html(payload: str) -> str:
+    """QR as HTML-safe square SVG (no XML prolog / mm sizes that stretch in <img>)."""
+    img = qrcode.make(payload, image_factory=SvgPathImage, box_size=8, border=2)
+    stream = BytesIO()
+    img.save(stream)
+    svg = stream.getvalue().decode("utf-8")
+    if svg.startswith("<?xml"):
+        svg = svg.split("?>", 1)[-1].lstrip()
+    # qrcode emits width/height in mm; browsers often distort that as a data-URL <img>.
+    # Keep the square viewBox and pin display size in px.
+    size = int(getattr(img, "pixel_size", 0) or 0)
+    if size <= 0:
+        size = 180
+    svg = svg.replace(f'width="{img.units(img.pixel_size)}"', f'width="{size}"', 1)
+    svg = svg.replace(f'height="{img.units(img.pixel_size)}"', f'height="{size}"', 1)
+    if 'width="' not in svg[:120]:
+        svg = svg.replace("<svg ", f'<svg width="{size}" height="{size}" ', 1)
+    if "preserveAspectRatio=" not in svg:
+        svg = svg.replace("<svg ", '<svg preserveAspectRatio="xMidYMid meet" ', 1)
+    # Dark portal UI: force a white canvas so black modules stay scannable.
+    if "style=" not in svg[:120]:
+        svg = svg.replace("<svg ", '<svg style="background:#ffffff" ', 1)
+    if "<path " in svg and "fill=" not in svg:
+        svg = svg.replace("<path ", '<path fill="#000000" ', 1)
+    return svg
 
 
 def _json_ok(**kwargs: Any):
@@ -1267,13 +1294,10 @@ def admin_auth_2fa_begin():
     account = str(cfg.get("admin_username", "") or "admin")
     device = str(cfg.get("device_name", "") or "blockvase")
     uri = otpauth_uri(secret, account_name=f"{account}@{device}", issuer="Blockvase")
-    img = qrcode.make(uri, image_factory=SvgImage)
-    stream = BytesIO()
-    img.save(stream)
     return _json_ok(
         secret=secret,
         otpauth_url=uri,
-        qr_svg=stream.getvalue().decode("utf-8"),
+        qr_svg=_qr_svg_for_html(uri),
         message="Scan the QR with your authenticator app, then confirm with a code.",
     )
 
@@ -2004,6 +2028,13 @@ def stats():
                     largest_block = max(largest_block, int(block.get("size", 0) or 0))
                 except (TypeError, ValueError):
                     continue
+    device_blocks_found = None
+    try:
+        mining = fetch_mining_metrics(timeout_override=0.5)
+        if mining.get("available"):
+            device_blocks_found = int(mining.get("total_blocks_found") or 0)
+    except Exception:
+        device_blocks_found = None
     return jsonify(
         {
             "uptime": f"{int(time.monotonic() // 60)} min",
@@ -2023,6 +2054,7 @@ def stats():
             "rpcErrorBody": m.get("rpc_error_body"),
             "blockHeight": m.get("blocks", 0),
             "blocksFound": m.get("blocks_found", 0),
+            "deviceBlocksFound": device_blocks_found,
         }
     )
 
@@ -2092,6 +2124,10 @@ def factory_reset():
     cfg["rpc"].update(preserved_rpc)
     _apply_local_rpc(cfg)
     save_config(cfg)
+    try:
+        reset_portal_stats()
+    except Exception:
+        _log.exception("factory-reset portal stats clear failed")
     # New device identity cert after wipe (old client trust becomes invalid).
     _ensure_portal_tls(force=True)
     ap_script = _privileged_script("ap-mode.sh")

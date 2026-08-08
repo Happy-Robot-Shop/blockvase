@@ -577,12 +577,24 @@ body.portal-page .portal-tls-banner .portal-tls-guide {
 
 body.portal-page label {
  display: block;
+ margin-top: var(--portal-space-3);
  margin-bottom: var(--portal-space-1);
  font-size: var(--portal-text-caption);
  font-weight: 600;
  letter-spacing: var(--portal-track-overline);
  text-transform: uppercase;
  color: var(--muted);
+}
+
+/* Keep the first label in a section flush, but not labels that are only
+   first-child because they sit in a show/hide wrapper (e.g. 2FA code). */
+body.portal-page label:first-child {
+ margin-top: 0;
+}
+
+body.portal-page [id$="TotpWrap"] > label:first-child,
+body.portal-page [id$="TotpStep"] > label:first-child {
+ margin-top: var(--portal-space-3);
 }
 
 body.portal-page input,
@@ -2536,6 +2548,29 @@ body.portal-page.wallet-page .wallet-receive-qr {
  padding: 8px;
  box-sizing: border-box;
  flex: 0 0 auto;
+}
+
+body.portal-page.settings-page .totp-qr-wrap {
+ width: 196px;
+ height: 196px;
+ padding: 8px;
+ border-radius: 8px;
+ background: #ffffff;
+ box-sizing: border-box;
+ display: grid;
+ place-items: center;
+ flex: 0 0 auto;
+}
+
+body.portal-page.settings-page .totp-qr-wrap img,
+body.portal-page.settings-page .totp-qr-wrap svg {
+ display: block;
+ width: 180px;
+ height: 180px;
+ max-width: 180px;
+ max-height: 180px;
+ aspect-ratio: 1 / 1;
+ object-fit: contain;
 }
 
 body.portal-page.wallet-page .wallet-receive-details {

@@ -399,7 +399,19 @@ function beginTotpSetup() {
       const enroll = document.getElementById("totpEnrollPanel");
       const qrWrap = document.getElementById("totpQrWrap");
       const secretEl = document.getElementById("totpManualSecret");
-      if (qrWrap) qrWrap.innerHTML = d.qr_svg || "";
+      if (qrWrap) {
+        const svg = d.qr_svg || "";
+        qrWrap.innerHTML = "";
+        if (svg) {
+          // Render as <img> so SVG namespaces/XML paint correctly (innerHTML drops svg:rect).
+          const img = document.createElement("img");
+          img.alt = "Authenticator QR code";
+          img.width = 180;
+          img.height = 180;
+          img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+          qrWrap.appendChild(img);
+        }
+      }
       if (secretEl) secretEl.textContent = d.secret || "";
       if (enroll) enroll.style.display = "block";
       showStatus(statusDiv, "success", d.message || "Scan the QR, then confirm a code.");
@@ -993,6 +1005,11 @@ function refreshStats() {
       document.getElementById("rpcStatus").textContent = statusText;
       document.getElementById("blockHeight").textContent = d.blockHeight ?? "-";
       document.getElementById("blocksFound").textContent = d.blocksFound ?? "-";
+      const deviceBlocksEl = document.getElementById("deviceBlocksFound");
+      if (deviceBlocksEl) {
+        deviceBlocksEl.textContent =
+          d.deviceBlocksFound != null && d.deviceBlocksFound !== "" ? d.deviceBlocksFound : "-";
+      }
     })
     .catch(() => {});
 }

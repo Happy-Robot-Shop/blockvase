@@ -168,7 +168,7 @@
             <div id="totpStatus" class="status info" style="display:none;"></div>
             <p class="muted-note muted-note--compact" id="totpStateLabel">Status: checking…</p>
             <div id="totpEnrollPanel" style="display:none;">
-              <div id="totpQrWrap" class="btn-spaced" style="max-width:220px;"></div>
+              <div id="totpQrWrap" class="totp-qr-wrap btn-spaced" aria-label="Authenticator QR code"></div>
               <p class="muted-note muted-note--compact">Or enter this key manually: <code id="totpManualSecret"></code></p>
               <label for="totpConfirmCode">Confirm code</label>
               <input id="totpConfirmCode" type="text" inputmode="numeric" maxlength="8" placeholder="6-digit code" autocomplete="one-time-code" />
@@ -321,7 +321,8 @@
             <h4 class="metric-cluster-title">Bitcoin Knots</h4>
             <dl class="metric-kv-compact">
               <dt>Block height</dt><dd class="settings-kv-highlight" id="blockHeight">-</dd>
-              <dt>Blocks found</dt><dd id="blocksFound">-</dd>
+              <dt title="Lifetime network tip advances counted since first boot (not solo-mining wins)">New blocks seen</dt><dd id="blocksFound">-</dd>
+              <dt title="Lifetime lifetime total of blocks this device’s miner found">Solo blocks found</dt><dd id="deviceBlocksFound">-</dd>
               <dt>Largest block</dt><dd id="largestBlock">-</dd>
               <dt>RPC endpoint</dt><dd class="portal-kpi-value--mono settings-kv-mono" id="rpcNodeInfo">-</dd>
               <dt>Status</dt><dd id="bitcoinNode">-</dd>
